@@ -92,7 +92,7 @@ def login():
  return render_template('login.html',form=f)
 
 @app.route('/signup',methods=['GET','POST'])
-@limiter.limit('5 per hour')
+@limiter.limit('20 per hour')
 def signup():
  if current_user.is_authenticated:return redirect(url_for('dashboard'))
  f=SignupForm()
