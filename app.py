@@ -150,36 +150,948 @@ def results(aid):
  for fn in CORE:
   vals=[(x.value-1)/4*100 for x in a.answers if x.question.function==fn and not x.is_na and x.value];scores[fn]=round(sum(vals)/len(vals),1) if vals else None
  risks=[x for x in a.answers if x.value and x.value<=2];return render_template('results.html',a=a,scores=scores,risks=risks)
-@app.get('/assessment/<int:aid>/report.pdf')
+
+
+@app.get("/assessment/<int:aid>/report.pdf")
 @login_required
 def report(aid):
-    a=db.session.get(Assessment,aid) or abort(404);owned(a)
-    scores={}
-    for fn in CORE:
-        vals=[(x.value-1)/4*100 for x in a.answers if x.question.function==fn and not x.is_na and x.value]
-        scores[fn]=round(sum(vals)/len(vals),1) if vals else None
-    weak=[x for x in a.answers if x.value and x.value<=2]
-    badge=('STRONG PREPAREDNESS' if a.readiness=='Strong' else 'GOOD PREPAREDNESS' if a.readiness=='Good' else 'IMPROVEMENT REQUIRED')
-    buf=BytesIO();doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=17*mm,leftMargin=17*mm,topMargin=16*mm,bottomMargin=17*mm,title=f'RansomwareShield-SA Assessment {a.id}',author='RansomwareShield-SA Group 7');st=getSampleStyleSheet();brand=colors.HexColor('#6F2CFF');navy=colors.HexColor('#07051B');soft=colors.HexColor('#F3F5FB');story=[]
-    logo_path=Path(__file__).parent/'static'/'logo.jpg'
+    assessment_record = db.session.get(Assessment, aid)
+
+    if assessment_record is None:
+        abort(404)
+
+    owned(assessment_record)
+
+    # ---------------------------------------------------------
+    # CALCULATE FUNCTION SCORES
+    # ---------------------------------------------------------
+
+    function_scores = {}
+
+    for function_name in CORE:
+
+        values = [
+            (answer.value - 1) / 4 * 100
+            for answer in assessment_record.answers
+            if answer.question.function == function_name
+            and not answer.is_na
+            and answer.value is not None
+        ]
+
+        if values:
+            function_scores[function_name] = round(
+                sum(values) / len(values),
+                1
+            )
+        else:
+            function_scores[function_name] = None
+
+    weak_answers = [
+        answer
+        for answer in assessment_record.answers
+        if answer.value is not None
+        and answer.value <= 2
+    ]
+
+    # ---------------------------------------------------------
+    # READINESS BADGE CONFIGURATION
+    # ---------------------------------------------------------
+
+    readiness_name = assessment_record.readiness or "Not assessable"
+
+    if readiness_name == "Strong":
+
+        badge_text = "STRONG PREPAREDNESS"
+        badge_colour = colors.HexColor("#157347")
+        badge_background = colors.HexColor("#EAF8EF")
+
+    elif readiness_name == "Good":
+
+        badge_text = "GOOD PREPAREDNESS"
+        badge_colour = colors.HexColor("#6F2CFF")
+        badge_background = colors.HexColor("#EEE8FF")
+
+    elif readiness_name == "Developing":
+
+        badge_text = "DEVELOPING READINESS"
+        badge_colour = colors.HexColor("#996500")
+        badge_background = colors.HexColor("#FFF6DA")
+
+    elif readiness_name == "Weak":
+
+        badge_text = "IMPROVEMENT REQUIRED"
+        badge_colour = colors.HexColor("#B54708")
+        badge_background = colors.HexColor("#FFF1E6")
+
+    else:
+
+        badge_text = "PRIORITY IMPROVEMENT REQUIRED"
+        badge_colour = colors.HexColor("#B42318")
+        badge_background = colors.HexColor("#FFF0EE")
+
+    # ---------------------------------------------------------
+    # CREATE PDF DOCUMENT
+    # ---------------------------------------------------------
+
+    pdf_buffer = BytesIO()
+
+    document = SimpleDocTemplate(
+        pdf_buffer,
+        pagesize=A4,
+        rightMargin=17 * mm,
+        leftMargin=17 * mm,
+        topMargin=15 * mm,
+        bottomMargin=17 * mm,
+        title=(
+            f"RansomwareShield-SA Assessment "
+            f"{assessment_record.id}"
+        ),
+        author="RansomwareShield-SA Group 7"
+    )
+
+    styles = getSampleStyleSheet()
+
+    brand_purple = colors.HexColor("#6F2CFF")
+    brand_navy = colors.HexColor("#07051B")
+    brand_cyan = colors.HexColor("#31C8FF")
+    soft_background = colors.HexColor("#F3F5FB")
+    border_colour = colors.HexColor("#DFE3EF")
+    text_colour = colors.HexColor("#20233A")
+    muted_colour = colors.HexColor("#70758F")
+
+    story = []
+
+    # =========================================================
+    # PROFESSIONAL REPORT HEADER
+    # =========================================================
+
+    logo_path = (
+        Path(__file__).resolve().parent
+        / "static"
+        / "logo.jpg"
+    )
+
+    logo_content = ""
+
     if logo_path.exists():
+
         from reportlab.platypus import Image
-        logo=Image(str(logo_path),width=42*mm,height=20*mm);logo.hAlign='LEFT';story.append(logo)
-    hero=Table([[Paragraph('<font color="#31C8FF"><b>CYBERSECURITY READINESS ASSESSMENT</b></font><br/><font size="22" color="white"><b>RansomwareShield-SA</b></font><br/><font color="#D9DEF2">Official academic prototype report</font>',st['BodyText']),Paragraph(f'<para align="center"><font color="white" size="24"><b>{a.overall_score}%</b></font><br/><font color="#31C8FF"><b>{a.readiness}</b></font></para>',st['BodyText'])]],colWidths=[125*mm,42*mm]);hero.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),navy),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('PADDING',(0,0),(-1,-1),12)]));story += [hero,Spacer(1,10)]
-    badge_box=Table([[Paragraph(f'<para align="center"><font color="#6F2CFF"><b>DEMO READINESS BADGE</b></font><br/><font size="17" color="#07051B"><b>{badge}</b></font><br/><font color="#70758F">Project-defined result; not certification or a guarantee against ransomware.</font></para>',st['BodyText'])]],colWidths=[167*mm]);badge_box.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#EEE8FF')),('BOX',(0,0),(-1,-1),1,brand),('PADDING',(0,0),(-1,-1),10)]));story += [badge_box,Spacer(1,12)]
-    details=Table([['Organisation',a.organisation],['Assessor',a.user.fullname],['Role',a.user.role],['Assessment ID',f'RSA-{a.id:04d}'],['Completed',a.submitted_at.strftime('%d %B %Y %H:%M UTC') if a.submitted_at else 'Not recorded']],colWidths=[42*mm,125*mm]);details.setStyle(TableStyle([('BACKGROUND',(0,0),(0,-1),soft),('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('PADDING',(0,0),(-1,-1),7)]));story += [details,Spacer(1,14),Paragraph('Function Scorecard',st['Heading2'])]
-    rows=[['NIST CSF Function','Score','Interpretation']]
-    for fn,score in scores.items():
-        interp='Not assessable' if score is None else ('Strong' if score>=90 else 'Good' if score>=75 else 'Developing' if score>=60 else 'Weak' if score>=40 else 'Critical');rows.append([fn,'N/A' if score is None else f'{score:.1f}%',interp])
-    score_table=Table(rows,colWidths=[66*mm,34*mm,67*mm],repeatRows=1);score_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),brand),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,soft]),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('PADDING',(0,0),(-1,-1),7)]));story += [score_table,Spacer(1,14),Paragraph('Priority Findings and Recommended Actions',st['Heading2'])]
-    if weak:
-        rr=[['Code','Priority','Finding and recommended action']]
-        for x in weak:rr.append([x.question.code,'Critical' if x.value==1 else 'High',Paragraph(f'<b>{x.question.text}</b><br/>Strengthen the {x.question.function} control area, assign an accountable owner, define a target date and retain implementation and testing evidence.',st['BodyText'])])
-        rt=Table(rr,colWidths=[20*mm,25*mm,122*mm],repeatRows=1);rt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),navy),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),6)]));story.append(rt)
-    else:story.append(Paragraph('No score-triggered priority findings were generated.',st['BodyText']))
-    story += [Spacer(1,14),Paragraph('Management Note',st['Heading2']),Paragraph('This report should be used to prioritise improvement and retesting. It does not certify that the organisation is immune to ransomware or ready for every attack scenario.',st['BodyText']),Spacer(1,12),Paragraph('<font color="#70758F"><b>CONFIDENTIAL DEMONSTRATION REPORT</b> · RansomwareShield-SA Group 7 · Fictional academic assessment information.</font>',st['BodyText'])]
-    doc.build(story);buf.seek(0);audit('REPORT_GENERATE','SUCCESS',f'Assessment {a.id}');return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name=f'RansomwareShield-SA-Official-Report-{a.id}.pdf')
+
+        logo_content = Image(
+            str(logo_path),
+            width=30 * mm,
+            height=22 * mm
+        )
+
+        logo_content.hAlign = "CENTER"
+
+    title_content = Paragraph(
+        """
+        <font color="#31C8FF" size="8">
+            <b>CYBERSECURITY READINESS ASSESSMENT</b>
+        </font>
+        <br/>
+        <font color="#FFFFFF" size="18">
+            <b>RansomwareShield-SA</b>
+        </font>
+        <br/>
+        <font color="#D9DEF2" size="9">
+            Cybersecurity Readiness Assessment Report
+        </font>
+        <br/>
+        <font color="#9CA6C9" size="7">
+            Official Academic Prototype
+        </font>
+        """,
+        styles["BodyText"]
+    )
+
+    score_display = (
+        "N/A"
+        if assessment_record.overall_score is None
+        else f"{assessment_record.overall_score}%"
+    )
+
+    score_content = Paragraph(
+        f"""
+        <para align="center">
+            <font color="#FFFFFF" size="25">
+                <b>{score_display}</b>
+            </font>
+            <br/>
+            <font color="#31C8FF" size="11">
+                <b>{readiness_name.upper()}</b>
+            </font>
+            <br/>
+            <font color="#B8C0DF" size="6">
+                OVERALL READINESS
+            </font>
+        </para>
+        """,
+        styles["BodyText"]
+    )
+
+    header_table = Table(
+        [
+            [
+                logo_content,
+                title_content,
+                score_content
+            ]
+        ],
+        colWidths=[
+            37 * mm,
+            87 * mm,
+            43 * mm
+        ],
+        rowHeights=[
+            40 * mm
+        ]
+    )
+
+    header_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    brand_navy
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    12
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    12
+                ),
+                (
+                    "LINEBEFORE",
+                    (2, 0),
+                    (2, 0),
+                    0.7,
+                    colors.HexColor("#373064")
+                )
+            ]
+        )
+    )
+
+    story.append(header_table)
+    story.append(Spacer(1, 7 * mm))
+
+    # =========================================================
+    # DEMONSTRATION READINESS BADGE
+    # =========================================================
+
+    badge_content = Paragraph(
+        f"""
+        <para align="center">
+            <font color="{badge_colour.hexval()}" size="7">
+                <b>DEMO READINESS ASSESSMENT</b>
+            </font>
+            <br/>
+            <font color="#07051B" size="16">
+                <b>{badge_text}</b>
+            </font>
+            <br/>
+            <font color="#70758F" size="8">
+                Project-defined readiness result.
+                This result does not represent certification
+                or guarantee protection against ransomware.
+            </font>
+        </para>
+        """,
+        styles["BodyText"]
+    )
+
+    badge_box = Table(
+        [
+            [
+                badge_content
+            ]
+        ],
+        colWidths=[
+            167 * mm
+        ],
+        rowHeights=[
+            27 * mm
+        ]
+    )
+
+    badge_box.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    badge_background
+                ),
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    1,
+                    badge_colour
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    14
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    14
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                )
+            ]
+        )
+    )
+
+    story.append(badge_box)
+    story.append(Spacer(1, 9 * mm))
+
+    # =========================================================
+    # ASSESSMENT DETAILS
+    # =========================================================
+
+    story.append(
+        Paragraph(
+            """
+            <font color="#07051B" size="13">
+                <b>Assessment Details</b>
+            </font>
+            """,
+            styles["BodyText"]
+        )
+    )
+
+    story.append(Spacer(1, 3 * mm))
+
+    completed_value = (
+        assessment_record.submitted_at.strftime(
+            "%d %B %Y %H:%M UTC"
+        )
+        if assessment_record.submitted_at
+        else "Not recorded"
+    )
+
+    details_table = Table(
+        [
+            [
+                "Organisation",
+                assessment_record.organisation
+            ],
+            [
+                "Assessor",
+                assessment_record.user.fullname
+            ],
+            [
+                "Role",
+                assessment_record.user.role
+            ],
+            [
+                "Assessment Reference",
+                f"RSA-{assessment_record.id:04d}"
+            ],
+            [
+                "Readiness Classification",
+                readiness_name
+            ],
+            [
+                "Completed",
+                completed_value
+            ]
+        ],
+        colWidths=[
+            48 * mm,
+            119 * mm
+        ]
+    )
+
+    details_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (0, -1),
+                    soft_background
+                ),
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (0, -1),
+                    brand_navy
+                ),
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (0, -1),
+                    "Helvetica-Bold"
+                ),
+                (
+                    "TEXTCOLOR",
+                    (1, 0),
+                    (1, -1),
+                    text_colour
+                ),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.4,
+                    border_colour
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                )
+            ]
+        )
+    )
+
+    story.append(details_table)
+    story.append(Spacer(1, 9 * mm))
+
+    # =========================================================
+    # FUNCTION SCORECARD
+    # =========================================================
+
+    story.append(
+        Paragraph(
+            """
+            <font color="#07051B" size="14">
+                <b>NIST CSF 2.0 Function Scorecard</b>
+            </font>
+            """,
+            styles["BodyText"]
+        )
+    )
+
+    story.append(Spacer(1, 4 * mm))
+
+    score_rows = [
+        [
+            "NIST CSF Function",
+            "Score",
+            "Interpretation"
+        ]
+    ]
+
+    for function_name, score in function_scores.items():
+
+        if score is None:
+
+            interpretation = "Not assessable"
+            displayed_score = "N/A"
+
+        else:
+
+            displayed_score = f"{score:.1f}%"
+
+            if score >= 90:
+                interpretation = "Strong"
+
+            elif score >= 75:
+                interpretation = "Good"
+
+            elif score >= 60:
+                interpretation = "Developing"
+
+            elif score >= 40:
+                interpretation = "Weak"
+
+            else:
+                interpretation = "Critical"
+
+        score_rows.append(
+            [
+                function_name,
+                displayed_score,
+                interpretation
+            ]
+        )
+
+    score_table = Table(
+        score_rows,
+        colWidths=[
+            66 * mm,
+            34 * mm,
+            67 * mm
+        ],
+        repeatRows=1
+    )
+
+    score_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    brand_purple
+                ),
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (-1, 0),
+                    colors.white
+                ),
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold"
+                ),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [
+                        colors.white,
+                        soft_background
+                    ]
+                ),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.4,
+                    border_colour
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    7
+                )
+            ]
+        )
+    )
+
+    story.append(score_table)
+    story.append(Spacer(1, 8 * mm))
+
+    # =========================================================
+    # PRIORITY FINDINGS
+    # =========================================================
+
+    story.append(
+        Paragraph(
+            """
+            <font color="#07051B" size="14">
+                <b>Priority Findings and Recommended Actions</b>
+            </font>
+            """,
+            styles["BodyText"]
+        )
+    )
+
+    story.append(Spacer(1, 4 * mm))
+
+    if weak_answers:
+
+        risk_rows = [
+            [
+                "Code",
+                "Priority",
+                "Finding and recommended action"
+            ]
+        ]
+
+        for answer in weak_answers:
+
+            priority = (
+                "Critical"
+                if answer.value == 1
+                else "High"
+            )
+
+            finding_content = Paragraph(
+                f"""
+                <b>{answer.question.text}</b>
+                <br/>
+                Strengthen the
+                {answer.question.function}
+                control area, assign an accountable owner,
+                define a target completion date and retain
+                implementation and testing evidence.
+                """,
+                styles["BodyText"]
+            )
+
+            risk_rows.append(
+                [
+                    answer.question.code,
+                    priority,
+                    finding_content
+                ]
+            )
+
+        risk_table = Table(
+            risk_rows,
+            colWidths=[
+                20 * mm,
+                25 * mm,
+                122 * mm
+            ],
+            repeatRows=1
+        )
+
+        risk_table.setStyle(
+            TableStyle(
+                [
+                    (
+                        "BACKGROUND",
+                        (0, 0),
+                        (-1, 0),
+                        brand_navy
+                    ),
+                    (
+                        "TEXTCOLOR",
+                        (0, 0),
+                        (-1, 0),
+                        colors.white
+                    ),
+                    (
+                        "FONTNAME",
+                        (0, 0),
+                        (-1, 0),
+                        "Helvetica-Bold"
+                    ),
+                    (
+                        "GRID",
+                        (0, 0),
+                        (-1, -1),
+                        0.4,
+                        border_colour
+                    ),
+                    (
+                        "VALIGN",
+                        (0, 0),
+                        (-1, -1),
+                        "TOP"
+                    ),
+                    (
+                        "LEFTPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        6
+                    ),
+                    (
+                        "RIGHTPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        6
+                    ),
+                    (
+                        "TOPPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        6
+                    ),
+                    (
+                        "BOTTOMPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        6
+                    )
+                ]
+            )
+        )
+
+        story.append(risk_table)
+
+    else:
+
+        no_findings = Table(
+            [
+                [
+                    Paragraph(
+                        """
+                        <para align="center">
+                            <font color="#157347">
+                                <b>
+                                    No score-triggered priority
+                                    findings were generated.
+                                </b>
+                            </font>
+                        </para>
+                        """,
+                        styles["BodyText"]
+                    )
+                ]
+            ],
+            colWidths=[
+                167 * mm
+            ]
+        )
+
+        no_findings.setStyle(
+            TableStyle(
+                [
+                    (
+                        "BACKGROUND",
+                        (0, 0),
+                        (-1, -1),
+                        colors.HexColor("#EAF8EF")
+                    ),
+                    (
+                        "BOX",
+                        (0, 0),
+                        (-1, -1),
+                        1,
+                        colors.HexColor("#157347")
+                    ),
+                    (
+                        "TOPPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        10
+                    ),
+                    (
+                        "BOTTOMPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        10
+                    )
+                ]
+            )
+        )
+
+        story.append(no_findings)
+
+    story.append(Spacer(1, 8 * mm))
+
+    # =========================================================
+    # MANAGEMENT NOTE
+    # =========================================================
+
+    story.append(
+        Paragraph(
+            """
+            <font color="#07051B" size="14">
+                <b>Management Note</b>
+            </font>
+            """,
+            styles["BodyText"]
+        )
+    )
+
+    story.append(Spacer(1, 3 * mm))
+
+    management_note = Table(
+        [
+            [
+                Paragraph(
+                    """
+                    This report should be used to prioritise
+                    improvement, assign control owners and support
+                    future retesting. It does not certify that the
+                    organisation is immune to ransomware or ready
+                    for every attack scenario.
+                    """,
+                    styles["BodyText"]
+                )
+            ]
+        ],
+        colWidths=[
+            167 * mm
+        ]
+    )
+
+    management_note.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    colors.HexColor("#F3F5FB")
+                ),
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.7,
+                    border_colour
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    10
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    10
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    9
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    9
+                )
+            ]
+        )
+    )
+
+    story.append(management_note)
+    story.append(Spacer(1, 7 * mm))
+
+    # =========================================================
+    # REPORT FOOTER
+    # =========================================================
+
+    story.append(
+        Paragraph(
+            """
+            <para align="center">
+                <font color="#70758F" size="7">
+                    <b>CONFIDENTIAL DEMONSTRATION REPORT</b>
+                    <br/>
+                    RansomwareShield-SA Group 7
+                    · Fictional academic assessment information
+                </font>
+            </para>
+            """,
+            styles["BodyText"]
+        )
+    )
+
+    # ---------------------------------------------------------
+    # BUILD AND RETURN PDF
+    # ---------------------------------------------------------
+
+    document.build(story)
+
+    pdf_buffer.seek(0)
+
+    audit(
+        "REPORT_GENERATE",
+        "SUCCESS",
+        f"Assessment {assessment_record.id}"
+    )
+
+    return send_file(
+        pdf_buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=(
+            "RansomwareShield-SA-"
+            f"Official-Report-{assessment_record.id}.pdf"
+        )
+    )
 
 
+with app.app_context():
+    db.create_all()
+    seed()
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
 with app.app_context():db.create_all();seed()
 if __name__=='__main__':app.run(debug=True)
