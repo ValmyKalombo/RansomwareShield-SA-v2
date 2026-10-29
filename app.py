@@ -153,10 +153,33 @@ def results(aid):
 @app.get('/assessment/<int:aid>/report.pdf')
 @login_required
 def report(aid):
- a=db.session.get(Assessment,aid) or abort(404);owned(a);buf=BytesIO();doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=18*mm,leftMargin=18*mm);st=getSampleStyleSheet();story=[Paragraph('RansomwareShield-SA',st['Title']),Paragraph('Cybersecurity Readiness Assessment Report',st['Heading2']),Spacer(1,12),Paragraph(f'<b>Organisation:</b> {a.organisation}',st['BodyText']),Paragraph(f'<b>Assessor:</b> {a.user.fullname}',st['BodyText']),Paragraph(f'<b>Overall score:</b> {a.overall_score}%',st['BodyText']),Paragraph(f'<b>Readiness:</b> {a.readiness}',st['BodyText']),Spacer(1,12),Paragraph('Weaknesses and Recommendations',st['Heading2'])]
- weak=[x for x in a.answers if x.value and x.value<=2]
- for x in weak:story.append(Paragraph(f'<b>{x.question.code}</b> {x.question.text}<br/>Recommended action: strengthen the {x.question.function} control area.',st['BodyText']));story.append(Spacer(1,6))
- story.append(Paragraph('<b>Method note:</b> Project-defined academic assessment; not official NIST certification.',st['BodyText']));doc.build(story);buf.seek(0);audit('REPORT_GENERATE','SUCCESS',f'Assessment {a.id}');return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name=f'RansomwareShield-SA-{a.id}.pdf')
+    a=db.session.get(Assessment,aid) or abort(404);owned(a)
+    scores={}
+    for fn in CORE:
+        vals=[(x.value-1)/4*100 for x in a.answers if x.question.function==fn and not x.is_na and x.value]
+        scores[fn]=round(sum(vals)/len(vals),1) if vals else None
+    weak=[x for x in a.answers if x.value and x.value<=2]
+    badge=('STRONG PREPAREDNESS' if a.readiness=='Strong' else 'GOOD PREPAREDNESS' if a.readiness=='Good' else 'IMPROVEMENT REQUIRED')
+    buf=BytesIO();doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=17*mm,leftMargin=17*mm,topMargin=16*mm,bottomMargin=17*mm,title=f'RansomwareShield-SA Assessment {a.id}',author='RansomwareShield-SA Group 7');st=getSampleStyleSheet();brand=colors.HexColor('#6F2CFF');navy=colors.HexColor('#07051B');soft=colors.HexColor('#F3F5FB');story=[]
+    logo_path=Path(__file__).parent/'static'/'logo.jpg'
+    if logo_path.exists():
+        from reportlab.platypus import Image
+        logo=Image(str(logo_path),width=42*mm,height=20*mm);logo.hAlign='LEFT';story.append(logo)
+    hero=Table([[Paragraph('<font color="#31C8FF"><b>CYBERSECURITY READINESS ASSESSMENT</b></font><br/><font size="22" color="white"><b>RansomwareShield-SA</b></font><br/><font color="#D9DEF2">Official academic prototype report</font>',st['BodyText']),Paragraph(f'<para align="center"><font color="white" size="24"><b>{a.overall_score}%</b></font><br/><font color="#31C8FF"><b>{a.readiness}</b></font></para>',st['BodyText'])]],colWidths=[125*mm,42*mm]);hero.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),navy),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('PADDING',(0,0),(-1,-1),12)]));story += [hero,Spacer(1,10)]
+    badge_box=Table([[Paragraph(f'<para align="center"><font color="#6F2CFF"><b>DEMO READINESS BADGE</b></font><br/><font size="17" color="#07051B"><b>{badge}</b></font><br/><font color="#70758F">Project-defined result; not certification or a guarantee against ransomware.</font></para>',st['BodyText'])]],colWidths=[167*mm]);badge_box.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#EEE8FF')),('BOX',(0,0),(-1,-1),1,brand),('PADDING',(0,0),(-1,-1),10)]));story += [badge_box,Spacer(1,12)]
+    details=Table([['Organisation',a.organisation],['Assessor',a.user.fullname],['Role',a.user.role],['Assessment ID',f'RSA-{a.id:04d}'],['Completed',a.submitted_at.strftime('%d %B %Y %H:%M UTC') if a.submitted_at else 'Not recorded']],colWidths=[42*mm,125*mm]);details.setStyle(TableStyle([('BACKGROUND',(0,0),(0,-1),soft),('FONTNAME',(0,0),(0,-1),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('PADDING',(0,0),(-1,-1),7)]));story += [details,Spacer(1,14),Paragraph('Function Scorecard',st['Heading2'])]
+    rows=[['NIST CSF Function','Score','Interpretation']]
+    for fn,score in scores.items():
+        interp='Not assessable' if score is None else ('Strong' if score>=90 else 'Good' if score>=75 else 'Developing' if score>=60 else 'Weak' if score>=40 else 'Critical');rows.append([fn,'N/A' if score is None else f'{score:.1f}%',interp])
+    score_table=Table(rows,colWidths=[66*mm,34*mm,67*mm],repeatRows=1);score_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),brand),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,soft]),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('PADDING',(0,0),(-1,-1),7)]));story += [score_table,Spacer(1,14),Paragraph('Priority Findings and Recommended Actions',st['Heading2'])]
+    if weak:
+        rr=[['Code','Priority','Finding and recommended action']]
+        for x in weak:rr.append([x.question.code,'Critical' if x.value==1 else 'High',Paragraph(f'<b>{x.question.text}</b><br/>Strengthen the {x.question.function} control area, assign an accountable owner, define a target date and retain implementation and testing evidence.',st['BodyText'])])
+        rt=Table(rr,colWidths=[20*mm,25*mm,122*mm],repeatRows=1);rt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),navy),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DFE3EF')),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),6)]));story.append(rt)
+    else:story.append(Paragraph('No score-triggered priority findings were generated.',st['BodyText']))
+    story += [Spacer(1,14),Paragraph('Management Note',st['Heading2']),Paragraph('This report should be used to prioritise improvement and retesting. It does not certify that the organisation is immune to ransomware or ready for every attack scenario.',st['BodyText']),Spacer(1,12),Paragraph('<font color="#70758F"><b>CONFIDENTIAL DEMONSTRATION REPORT</b> · RansomwareShield-SA Group 7 · Fictional academic assessment information.</font>',st['BodyText'])]
+    doc.build(story);buf.seek(0);audit('REPORT_GENERATE','SUCCESS',f'Assessment {a.id}');return send_file(buf,mimetype='application/pdf',as_attachment=True,download_name=f'RansomwareShield-SA-Official-Report-{a.id}.pdf')
+
 
 with app.app_context():db.create_all();seed()
 if __name__=='__main__':app.run(debug=True)
