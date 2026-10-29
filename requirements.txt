@@ -1,0 +1,12 @@
+Flask==3.1.2
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-WTF==1.2.2
+Flask-Limiter==4.1.1
+email-validator==2.3.0
+python-dotenv==1.2.1
+reportlab==4.4.4
+gunicorn==23.0.0
+psycopg2-binary==2.9.11
+cryptography==46.0.3
+pytest==9.0.2

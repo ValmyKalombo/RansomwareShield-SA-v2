@@ -1,0 +1,252 @@
+[
+  {
+    "code": "GV1",
+    "function": "Govern",
+    "text": "The bank has a board-approved cybersecurity strategy that includes ransomware preparedness."
+  },
+  {
+    "code": "GV2",
+    "function": "Govern",
+    "text": "Cybersecurity roles and responsibilities are assigned at senior-management level."
+  },
+  {
+    "code": "GV3",
+    "function": "Govern",
+    "text": "Cybersecurity risk is included in enterprise risk management."
+  },
+  {
+    "code": "GV4",
+    "function": "Govern",
+    "text": "The bank provides adequate budget and resources for ransomware preparedness."
+  },
+  {
+    "code": "GV5",
+    "function": "Govern",
+    "text": "Third-party and supply-chain cybersecurity risks are governed through policy."
+  },
+  {
+    "code": "GV6",
+    "function": "Govern",
+    "text": "The bank monitors relevant cybersecurity and privacy obligations."
+  },
+  {
+    "code": "GV7",
+    "function": "Govern",
+    "text": "Cybersecurity performance is reported to the board or executive committee."
+  },
+  {
+    "code": "ID1",
+    "function": "Identify",
+    "text": "The bank maintains an inventory of hardware, software, data and cloud assets."
+  },
+  {
+    "code": "ID2",
+    "function": "Identify",
+    "text": "Critical banking applications and sensitive information are identified and categorised."
+  },
+  {
+    "code": "ID3",
+    "function": "Identify",
+    "text": "Ransomware-focused risk and vulnerability assessments are performed regularly."
+  },
+  {
+    "code": "ID4",
+    "function": "Identify",
+    "text": "Dependencies on third-party vendors and service providers are mapped."
+  },
+  {
+    "code": "ID5",
+    "function": "Identify",
+    "text": "The bank considers cyber threats enabled by artificial intelligence."
+  },
+  {
+    "code": "ID6",
+    "function": "Identify",
+    "text": "The risk register includes ransomware scenarios."
+  },
+  {
+    "code": "ID7",
+    "function": "Identify",
+    "text": "Cybersecurity maturity is assessed against NIST CSF or a comparable framework."
+  },
+  {
+    "code": "PR1",
+    "function": "Protect",
+    "text": "Multi-factor authentication is enforced for privileged and remote access."
+  },
+  {
+    "code": "PR2",
+    "function": "Protect",
+    "text": "Patch management is implemented effectively."
+  },
+  {
+    "code": "PR3",
+    "function": "Protect",
+    "text": "Endpoint security or EDR is deployed across applicable endpoints."
+  },
+  {
+    "code": "PR4",
+    "function": "Protect",
+    "text": "Network segmentation is used to restrict ransomware spread."
+  },
+  {
+    "code": "PR5",
+    "function": "Protect",
+    "text": "Least-privilege access is implemented."
+  },
+  {
+    "code": "PR6",
+    "function": "Protect",
+    "text": "Cybersecurity awareness training is provided regularly."
+  },
+  {
+    "code": "PR7",
+    "function": "Protect",
+    "text": "Sensitive data is encrypted appropriately."
+  },
+  {
+    "code": "PR8",
+    "function": "Protect",
+    "text": "Backups are protected using offline, immutable or isolated controls."
+  },
+  {
+    "code": "PR9",
+    "function": "Protect",
+    "text": "Cybersecurity due diligence is performed on third-party vendors."
+  },
+  {
+    "code": "PR10",
+    "function": "Protect",
+    "text": "Email or web filtering is used to reduce ransomware delivery vectors."
+  },
+  {
+    "code": "DE1",
+    "function": "Detect",
+    "text": "Networks and endpoints are monitored continuously for anomalies."
+  },
+  {
+    "code": "DE2",
+    "function": "Detect",
+    "text": "A security operations capability or equivalent monitoring function exists."
+  },
+  {
+    "code": "DE3",
+    "function": "Detect",
+    "text": "Threat intelligence is used to identify ransomware campaigns."
+  },
+  {
+    "code": "DE4",
+    "function": "Detect",
+    "text": "Unauthorised data-exfiltration attempts can be detected."
+  },
+  {
+    "code": "DE5",
+    "function": "Detect",
+    "text": "Third-party access is monitored for suspicious activity."
+  },
+  {
+    "code": "DE6",
+    "function": "Detect",
+    "text": "Detections exist for ransomware indicators such as mass encryption or shadow-copy deletion."
+  },
+  {
+    "code": "DE7",
+    "function": "Detect",
+    "text": "Detection capabilities are assessed through controlled simulation exercises."
+  },
+  {
+    "code": "RS1",
+    "function": "Respond",
+    "text": "A documented ransomware incident-response plan exists."
+  },
+  {
+    "code": "RS2",
+    "function": "Respond",
+    "text": "Incident-response training or tabletop exercises are conducted."
+  },
+  {
+    "code": "RS3",
+    "function": "Respond",
+    "text": "Cybersecurity incident communication and escalation procedures are defined."
+  },
+  {
+    "code": "RS4",
+    "function": "Respond",
+    "text": "Affected systems can be isolated rapidly during an incident."
+  },
+  {
+    "code": "RS5",
+    "function": "Respond",
+    "text": "Forensic and legal support arrangements are defined."
+  },
+  {
+    "code": "RS6",
+    "function": "Respond",
+    "text": "The bank can coordinate with regulators, law enforcement and affected third parties."
+  },
+  {
+    "code": "RS7",
+    "function": "Respond",
+    "text": "Crisis-communication procedures address customers and media."
+  },
+  {
+    "code": "RS8",
+    "function": "Respond",
+    "text": "A formally approved ransom-payment policy exists."
+  },
+  {
+    "code": "RC1",
+    "function": "Recover",
+    "text": "Backup recovery processes are practised for critical systems."
+  },
+  {
+    "code": "RC2",
+    "function": "Recover",
+    "text": "Banking operations can be restored within approved recovery-time objectives."
+  },
+  {
+    "code": "RC3",
+    "function": "Recover",
+    "text": "Post-incident reviews produce control improvements."
+  },
+  {
+    "code": "RC4",
+    "function": "Recover",
+    "text": "Alternative locations or cloud recovery arrangements exist."
+  },
+  {
+    "code": "RC5",
+    "function": "Recover",
+    "text": "Recovery strategies are improved using lessons learned."
+  },
+  {
+    "code": "RC6",
+    "function": "Recover",
+    "text": "Ransomware recovery tests are conducted at planned intervals."
+  },
+  {
+    "code": "RC7",
+    "function": "Recover",
+    "text": "Recovery activities are coordinated with relevant third parties."
+  },
+  {
+    "code": "AI1",
+    "function": "AI Preparedness",
+    "text": "The bank assesses risks from AI-powered phishing or social engineering."
+  },
+  {
+    "code": "AI2",
+    "function": "AI Preparedness",
+    "text": "Automation supports detection of ransomware or phishing where appropriate."
+  },
+  {
+    "code": "AI3",
+    "function": "AI Preparedness",
+    "text": "Security training addresses AI-enabled attacks."
+  },
+  {
+    "code": "AI4",
+    "function": "AI Preparedness",
+    "text": "The bank monitors AI-enabled vulnerability discovery and exploitation trends."
+  }
+]

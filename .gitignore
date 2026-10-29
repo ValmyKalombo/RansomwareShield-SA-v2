@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+instance/*.db
+instance/*.sqlite*
+.pytest_cache/
+*.log
+evidence/*.png
+evidence/*.pdf

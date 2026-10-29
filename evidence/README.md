@@ -1,0 +1,1 @@
+Capture fictional evidence only: signup, login, stay signed in, dashboard identity, about page, protected route, logout, questionnaire, results, PDF, HTTPS address and passing tests.
