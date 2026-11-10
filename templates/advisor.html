@@ -1,0 +1,21 @@
+{% extends 'layout.html' %}
+{% block title %}ShieldAI | RansomwareShield-SA{% endblock %}
+{% block content %}
+<section class="hero ai-hero">
+  <div><p class="eyebrow">&#10024; ShieldAI advisor</p><h1>Executive readiness brief</h1><p>RSA-{{ '%04d' % a.id }} &middot; {{ a.organisation }}</p></div>
+  <div class="result-score"><strong>{{ a.overall_score }}%</strong><span>{{ a.readiness }}</span></div>
+</section>
+<section class="card">
+  <h2>Summary</h2>
+  <p class="brief">{{ brief.summary }}</p>
+  <p class="muted small">Engine: {{ brief.engine }}. AI-assisted draft &mdash; human review required. ShieldAI cannot change scores, close risks or certify compliance.</p>
+</section>
+<div class="plan-grid">
+  {% for horizon, items in brief.plan.items() %}
+  <section class="card plan"><span class="tag">{{ horizon }}</span>
+    <ul>{% for i in items %}<li>{{ i }}</li>{% else %}<li class="muted">No actions required in this window.</li>{% endfor %}</ul>
+  </section>
+  {% endfor %}
+</div>
+<a class="btn ghost" href="{{ url_for('results', aid=a.id) }}">&larr; Back to results</a>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Threat Exposure | RansomwareShield-SA{% endblock %}
+{% block crumb %}Threat Exposure{% endblock %}
+{% block content %}
+<section class="hero threat-hero">
+  <div><p class="eyebrow">Exposure intelligence</p><h1>Threat Exposure Scanner</h1><p>See how a domain looks to an attacker: email-spoofing defences, DNS integrity, HTTPS hardening and breach exposure.</p></div>
+  <div class="radar-anim" aria-hidden="true"><span></span></div>
+</section>
+
+<section class="card scan-card">
+  <form class="scan-form" data-scan-form>
+    <div class="scan-input">{{ icon('radar') }}<input name="target" maxlength="255" placeholder="example.co.za or security@example.co.za" aria-label="Domain or email" required></div>
+    <button class="btn primary" type="submit" data-scan-btn>Run exposure scan</button>
+  </form>
+  <div class="examples">Try: <button type="button" data-example="microsoft.com">microsoft.com</button><button type="button" data-example="gov.za">gov.za</button><button type="button" data-example="github.com">github.com</button></div>
+  <p class="fine">{{ icon('info','ic sm') }}Shows public exposure and hygiene only. It cannot prove ransomware is present on a device or mailbox. Never enter internal hostnames, passwords or customer data.</p>
+</section>
+
+<section class="scan-results" data-scan-results hidden>
+  <div class="scan-summary card">
+    <div class="ring" data-ring><svg viewBox="0 0 200 200"><circle class="g-track" cx="100" cy="100" r="84"/><circle class="g-arc" cx="100" cy="100" r="84"/></svg>
+      <div class="g-center"><span class="ring-icon" data-ring-icon></span><b data-ring-score>0</b><span data-ring-risk>Scanning</span></div></div>
+    <div class="scan-meta">
+      <p class="eyebrow dark" data-scan-domain></p>
+      <h2 data-scan-title>Scanning&hellip;</h2>
+      <p data-scan-summary class="muted"></p>
+      <div class="count-row"><span class="c-pass" data-c-pass>0 healthy</span><span class="c-warn" data-c-warn>0 attention</span><span class="c-fail" data-c-fail>0 critical</span><span class="c-info" data-c-info>0 info</span></div>
+      <button type="button" class="btn ghost sm" data-ai-ask="Explain my latest threat exposure result and how to fix it">{{ icon('compass') }}Ask ShieldAI how to fix this</button>
+    </div>
+  </div>
+  <div class="check-grid" data-check-grid></div>
+</section>
+
+<section class="card">
+  <div class="section-head"><h2>Recent scans</h2></div>
+  <div class="table"><table data-history><tr><th>Target</th><th>Type</th><th>Exposure</th><th>When (UTC)</th></tr>
+    {% for h in history %}<tr><td>{{ h.target }}</td><td>{{ h.target_type|capitalize }}</td><td><span class="risk-pill r-{{ h.risk|lower }}">{{ {'Low':'&#10003;','Medium':'!','High':'&#10005;','Critical':'&#10005;'}.get(h.risk,'')|safe }} {{ h.risk }}</span></td><td>{{ h.created_at.strftime('%d %b %H:%M') }}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">No scans yet.</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

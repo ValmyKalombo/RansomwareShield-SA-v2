@@ -1,11 +1,12 @@
 .venv/
 venv/
+.vscode/
 __pycache__/
 *.py[cod]
 .env
-instance/*.db
-instance/*.sqlite*
+instance/
 .pytest_cache/
 *.log
+reset_password.py
 evidence/*.png
 evidence/*.pdf

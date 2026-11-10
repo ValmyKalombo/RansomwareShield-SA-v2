@@ -1,0 +1,38 @@
+{% from '_icons.html' import icon %}
+<section class="about">
+  <div class="about-hero">
+    <img src="{{ url_for('static', filename='logo.jpg') }}" alt="RansomwareShield-SA logo">
+    <div><p class="eyebrow dark">Group 7 &middot; Project: Cyber Security</p>
+    <h1>RansomwareShield-SA</h1>
+    <p class="tagline">See your ransomware readiness. Prioritise what matters. Prove improvement.</p></div>
+  </div>
+
+  <div class="about-grid">
+    <article class="card"><h3>Who we are</h3><p>RansomwareShield-SA is a cybersecurity readiness platform designed for South African organisations, with a focus on the financial sector. It was conceived from Group 7's research into why banks and similar institutions struggle to see their overall ransomware preparedness when governance, people, technology, third parties and recovery are assessed in isolation.</p></article>
+    <article class="card"><h3>Our mission</h3><p>To make ransomware readiness <b>visible, explainable and actionable</b> - turning a structured assessment into a clear score, a prioritised risk register, owned remediation and an executive report that leadership can act on.</p></article>
+    <article class="card"><h3>Our vision</h3><p>An organisation that knows exactly where it is strong, where it is exposed and what to do next - and can demonstrate measurable improvement from one assessment to the next.</p></article>
+  </div>
+
+  <h2>What the platform does</h2>
+  <div class="pillars">
+    <div>{{ icon('target') }}<b>Assess</b><span>50 questions across Govern, Identify, Protect, Detect, Respond, Recover and AI Preparedness, aligned to NIST CSF 2.0.</span></div>
+    <div>{{ icon('activity') }}<b>Score</b><span>Weighted readiness score, radar profile and readiness badge, from Critical to Strong.</span></div>
+    <div>{{ icon('tasks') }}<b>Remediate</b><span>Every weak control becomes an owned, dated action tracked to closure.</span></div>
+    <div>{{ icon('radar') }}<b>Expose</b><span>External checks of email and DNS defences, HTTPS and breach exposure.</span></div>
+    <div>{{ icon('compass') }}<b>Advise</b><span>ShieldAI interprets results, answers security questions and guides users.</span></div>
+    <div>{{ icon('file') }}<b>Report</b><span>Branded executive PDF with radar, badge, findings and method.</span></div>
+  </div>
+
+  <div class="about-grid two">
+    <article class="card"><h3>Secure by design</h3><ul class="ticks"><li>HTTPS with HSTS and secure, HttpOnly cookies</li><li>scrypt password hashing, lockout and rate limiting</li><li>CSRF protection and a strict Content Security Policy</li><li>Role-based access with a protected Super Admin</li><li>One-use invitations and admin-issued reset codes</li><li>Sessions revoked automatically on password change</li><li>Audit trail for every security-relevant event</li></ul></article>
+    <article class="card"><h3>What it is not</h3><ul class="crosses"><li>Not antivirus, EDR or a SIEM - it does not scan devices</li><li>Not a ransomware detector - exposure checks show hygiene, not infection</li><li>Not certification - scores are project-defined guidance</li><li>Not for real data - this academic prototype uses fictional information only</li></ul></article>
+  </div>
+
+  <h2>Creators</h2>
+  <div class="team">
+    {% for name in ['Valmy Kalombo','Anele Nhlebela','Nyikiwe Sithole','Letlhogonolo Rebookgama'] %}
+    <article><div class="team-avatar">{{ name.split()[0][0] }}{{ name.split()[-1][0] }}</div><b>{{ name }}</b><span>Group 7 &middot; Co-creator</span></article>
+    {% endfor %}
+  </div>
+  <p class="fine center">RansomwareShield-SA v{{ app_version }} &middot; Built with Python, Flask, PostgreSQL and ReportLab &middot; Hosted on Render</p>
+</section>

@@ -1,1 +1,64 @@
-{% extends 'base.html' %}{% block body %}<div class="shell"><aside><a href="{{url_for('dashboard')}}" class="side-logo"><img src="{{url_for('static',filename='logo.jpg')}}" alt="RansomwareShield-SA logo"></a><nav><a href="{{url_for('dashboard')}}">Dashboard</a><a href="{{url_for('about')}}">About</a></nav><div class="profile"><div class="avatar">{{current_user.fullname[0]|upper}}</div><strong>{{current_user.fullname}}</strong><small>{{current_user.role}}</small><small>{{current_user.organisation}}</small><form method="post" action="{{url_for('logout')}}"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="btn secondary wide">Sign out</button></form></div></aside><section class="workspace"><header><div class="top-brand"><img src="{{url_for('static',filename='logo.jpg')}}" alt="RansomwareShield-SA logo"><div><strong>RansomwareShield-SA</strong><small>Cybersecurity Readiness Assessment Platform</small></div></div><span class="secure">● Secure session</span></header><main class="page">{% include 'messages.html' %}{% block content %}{% endblock %}</main></section></div>{% endblock %}
+{% extends 'base.html' %}
+{% from '_icons.html' import icon, shieldai_logo %}
+{% block body %}
+{% set ep = request.endpoint %}
+<div class="shell">
+  <aside class="sidebar">
+    <a href="{{ url_for('dashboard') }}" class="side-brand" data-tour="brand">
+      <img src="{{ url_for('static', filename='logo.jpg') }}" alt="RansomwareShield-SA logo">
+      <span><b>RansomwareShield</b><small>SA &middot; Readiness Platform</small></span>
+    </a>
+    <nav>
+      <p class="nav-label">Workspace</p>
+      <a data-tour="nav-dashboard" class="{{ 'active' if ep=='dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('dashboard') }}Dashboard</a>
+      <a data-tour="nav-remediation" class="{{ 'active' if ep=='actions' }}" href="{{ url_for('actions') }}">{{ icon('tasks') }}Remediation</a>
+      <a data-tour="nav-threat" class="{{ 'active' if ep=='threat_exposure' }}" href="{{ url_for('threat_exposure') }}">{{ icon('radar') }}Threat Exposure</a>
+      <a data-tour="nav-security" class="{{ 'active' if ep=='security' }}" href="{{ url_for('security') }}">{{ icon('shield') }}Security Centre</a>
+      {% if is_admin_user %}<p class="nav-label">Administration</p>
+      <a data-tour="nav-management" class="{{ 'active' if ep=='management' }}" href="{{ url_for('management') }}">{{ icon('users') }}Management Centre</a>{% endif %}
+      <p class="nav-label">Platform</p>
+      <a class="{{ 'active' if ep=='about' }}" href="{{ url_for('about') }}">{{ icon('info') }}About</a>
+    </nav>
+    <div class="profile">
+      <div class="avatar">{{ current_user.fullname[0]|upper }}</div>
+      <div class="who"><b>{{ current_user.fullname }}</b><small class="role-tag{{ ' super' if is_superadmin }}">{{ display_role(current_user) }}</small><small>{{ current_user.organisation }}</small></div>
+      <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn ghost-dark wide" type="submit">{{ icon('logout') }}Sign out</button></form>
+    </div>
+  </aside>
+  <section class="workspace">
+    <header class="topbar">
+      <button class="menu-btn" type="button" data-menu aria-label="Menu">&#9776;</button>
+      <div class="crumb">{% block crumb %}Workspace{% endblock %}</div>
+      <div class="top-right">
+        <span class="pill ok"><span class="pulse"></span>Secure session</span>
+        <span class="pill hide-sm">{{ icon('lock','ic sm') }}TLS &middot; CSRF &middot; Audited</span>
+      </div>
+    </header>
+    <main class="page" data-page="{{ ep }}">
+      {% include 'messages.html' %}
+      {% block content %}{% endblock %}
+    </main>
+  </section>
+</div>
+
+<button class="ai-fab" type="button" data-ai-open data-tour="ai-fab" aria-label="Open ShieldAI">{{ shieldai_logo('fab') }}<span class="fab-ring"></span></button>
+<section class="ai-panel" data-ai-panel aria-hidden="true" aria-label="ShieldAI assistant">
+  <header class="ai-head">
+    {{ shieldai_logo('head', 'shieldai-logo sm') }}
+    <div><b>ShieldAI</b><small data-ai-engine>Security assistant &middot; online</small></div>
+    <button type="button" data-ai-close aria-label="Close">{{ icon('x') }}</button>
+  </header>
+  <div class="ai-body" data-ai-body>
+    <div class="msg bot"><p>Hello {{ current_user.fullname.split()[0] }}. I'm <b>ShieldAI</b>, your ransomware-defence assistant. I can read your latest results, build an action plan, answer security questions or walk you through the platform.</p></div>
+    <div class="chips" data-chips>
+      <button type="button" data-q="What is RansomwareShield?">What is RansomwareShield?</button>
+      <button type="button" data-q="Give me a tour">Give me a tour</button>
+      <button type="button" data-q="What should I fix first?">What should I fix first?</button>
+      <button type="button" data-q="What do I do if we are hit by ransomware?">Incident first steps</button>
+    </div>
+  </div>
+  <form class="ai-form" data-ai-form><input maxlength="800" placeholder="Ask ShieldAI a security question" aria-label="Message"><button type="submit" aria-label="Send">&#10148;</button></form>
+  <p class="ai-foot">AI guidance - verify before acting. ShieldAI cannot change data or certify compliance.</p>
+</section>
+<div class="tour-layer" data-tour-layer hidden><div class="tour-spot" data-tour-spot></div><div class="tour-card" data-tour-card><small data-tour-count></small><h4 data-tour-title></h4><p data-tour-text></p><div class="tour-actions"><button type="button" class="btn ghost sm" data-tour-skip>End tour</button><button type="button" class="btn ghost sm" data-tour-prev>Back</button><button type="button" class="btn primary sm" data-tour-next>Next</button></div></div></div>
+{% endblock %}

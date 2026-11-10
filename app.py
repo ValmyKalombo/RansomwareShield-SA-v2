@@ -1,1097 +1,957 @@
-import json, os
-from datetime import datetime, timezone, timedelta
+"""RansomwareShield-SA v3.1.0 - Cybersecurity Readiness Platform (Group 7 academic prototype)."""
+import hashlib
+import json
+import logging
+import secrets
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
-from io import BytesIO
 from pathlib import Path
-from flask import Flask, render_template, redirect, url_for, flash, request, session, send_file, abort
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from flask_wtf import FlaskForm, CSRFProtect
+
+import msal
+import requests
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session,
+                   url_for)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from wtforms import StringField, PasswordField, BooleanField, SubmitField, SelectField
-from wtforms.validators import DataRequired, Email, Length, EqualTo, ValidationError
-from werkzeug.security import generate_password_hash, check_password_hash
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from flask_login import LoginManager, UserMixin, current_user, login_required, login_user, logout_user
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import CSRFProtect, FlaskForm
+from flask_wtf.csrf import CSRFError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import inspect, text
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash, generate_password_hash
+from wtforms import BooleanField, PasswordField, SelectField, StringField, SubmitField
+from wtforms.validators import DataRequired, Email, EqualTo, Length, ValidationError
+
+import report as report_builder
+import shieldai
+import threat
 from config import Config
 
-app=Flask(__name__);app.config.from_object(Config)
-db=SQLAlchemy(app);csrf=CSRFProtect(app);limiter=Limiter(key_func=get_remote_address,app=app,storage_uri='memory://')
-login_manager=LoginManager(app);login_manager.login_view='login';login_manager.login_message='Please sign in to access that page.';login_manager.login_message_category='warning';login_manager.session_protection='strong'
-CORE=['Govern','Identify','Protect','Detect','Respond','Recover'];WEIGHTS={'Govern':.20,'Identify':.15,'Protect':.20,'Detect':.15,'Respond':.15,'Recover':.15}
+BASE = Path(__file__).resolve().parent
+app = Flask(__name__)
+app.config.from_object(Config)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+log = logging.getLogger("ransomwareshield")
 
-class User(UserMixin,db.Model):
- id=db.Column(db.Integer,primary_key=True);fullname=db.Column(db.String(100),nullable=False);email=db.Column(db.String(255),unique=True,nullable=False,index=True);password_hash=db.Column(db.String(255),nullable=False);organisation=db.Column(db.String(150),nullable=False);role=db.Column(db.String(30),nullable=False,default='Assessor');active=db.Column(db.Boolean,default=True,nullable=False);failed_attempts=db.Column(db.Integer,default=0,nullable=False);locked_until=db.Column(db.DateTime(timezone=True));created_at=db.Column(db.DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
- @property
- def is_active(self):return self.active
- def set_password(self,p):self.password_hash=generate_password_hash(p,method='scrypt')
- def check_password(self,p):return check_password_hash(self.password_hash,p)
+db = SQLAlchemy(app)
+csrf = CSRFProtect(app)
+limiter = Limiter(key_func=get_remote_address, app=app, storage_uri="memory://", default_limits=["800 per hour"])
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please sign in to access that page."
+login_manager.login_message_category = "warning"
+login_manager.session_protection = "strong"
+
+CORE = ["Govern", "Identify", "Protect", "Detect", "Respond", "Recover"]
+ALL = CORE + ["AI Preparedness"]
+WEIGHTS = {"Govern": .20, "Identify": .15, "Protect": .20, "Detect": .15, "Respond": .15, "Recover": .15}
+RECS = {
+    "Govern": "Assign executive ownership, approve a ransomware policy and report readiness to the board quarterly.",
+    "Identify": "Maintain asset, data and dependency registers and model ransomware scenarios in the risk register.",
+    "Protect": "Prioritise MFA, patching, least privilege, segmentation and offline or immutable backups.",
+    "Detect": "Expand endpoint and identity monitoring and test ransomware-specific detection use cases.",
+    "Respond": "Approve and rehearse a ransomware response plan with clear escalation and communication paths.",
+    "Recover": "Test restoration of critical systems against RTO/RPO targets and retain the evidence.",
+    "AI Preparedness": "Include AI-enabled phishing and automated attack techniques in training and threat reviews.",
+}
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def aware(v):
+    return v if v is None or v.tzinfo else v.replace(tzinfo=timezone.utc)
+
+
+# ------------------------------------------------------------------ models
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    fullname = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    organisation = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(30), nullable=False, default="Assessor")
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    failed_attempts = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+    must_reset = db.Column(db.Boolean, default=False, nullable=False)
+    reset_expires = db.Column(db.DateTime(timezone=True))
+
+    @property
+    def is_active(self):
+        return self.active
+
+    def get_id(self):
+        # Binding the session to the password hash invalidates every session and
+        # remember-me cookie as soon as the password changes or is reset.
+        return f"{self.id}:{hashlib.sha256(self.password_hash.encode()).hexdigest()[:16]}"
+
+    def set_password(self, p):
+        self.password_hash = generate_password_hash(p, method="scrypt")
+
+    def check_password(self, p):
+        return check_password_hash(self.password_hash, p)
+
+    def locked(self):
+        lock = aware(self.locked_until)
+        return bool(lock and lock > utcnow())
+
 
 class Question(db.Model):
- id=db.Column(db.Integer,primary_key=True);code=db.Column(db.String(10),unique=True,nullable=False);function=db.Column(db.String(30),nullable=False);text=db.Column(db.Text,nullable=False);order=db.Column(db.Integer,nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(10), unique=True, nullable=False)
+    function = db.Column(db.String(30), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    order = db.Column(db.Integer, nullable=False)
+
+
 class Assessment(db.Model):
- id=db.Column(db.Integer,primary_key=True);user_id=db.Column(db.Integer,db.ForeignKey('user.id'),nullable=False);organisation=db.Column(db.String(150),nullable=False);status=db.Column(db.String(20),default='Draft');overall_score=db.Column(db.Float);readiness=db.Column(db.String(30));created_at=db.Column(db.DateTime(timezone=True),default=lambda:datetime.now(timezone.utc));submitted_at=db.Column(db.DateTime(timezone=True));user=db.relationship('User');answers=db.relationship('Answer',cascade='all,delete-orphan',lazy=True)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    organisation = db.Column(db.String(150), nullable=False)
+    status = db.Column(db.String(20), default="Draft")
+    overall_score = db.Column(db.Float)
+    readiness = db.Column(db.String(30))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+    submitted_at = db.Column(db.DateTime(timezone=True))
+    user = db.relationship("User")
+    answers = db.relationship("Answer", cascade="all,delete-orphan", lazy=True)
+
+
 class Answer(db.Model):
- id=db.Column(db.Integer,primary_key=True);assessment_id=db.Column(db.Integer,db.ForeignKey('assessment.id'),nullable=False);question_id=db.Column(db.Integer,db.ForeignKey('question.id'),nullable=False);value=db.Column(db.Integer);is_na=db.Column(db.Boolean,default=False);note=db.Column(db.String(500));question=db.relationship('Question');__table_args__=(db.UniqueConstraint('assessment_id','question_id'),)
+    id = db.Column(db.Integer, primary_key=True)
+    assessment_id = db.Column(db.Integer, db.ForeignKey("assessment.id"), nullable=False)
+    question_id = db.Column(db.Integer, db.ForeignKey("question.id"), nullable=False)
+    value = db.Column(db.Integer)
+    is_na = db.Column(db.Boolean, default=False)
+    note = db.Column(db.String(500))
+    question = db.relationship("Question")
+    __table_args__ = (db.UniqueConstraint("assessment_id", "question_id"),)
+
+
 class Audit(db.Model):
- id=db.Column(db.Integer,primary_key=True);user_id=db.Column(db.Integer,db.ForeignKey('user.id'));event=db.Column(db.String(50),nullable=False);outcome=db.Column(db.String(20),nullable=False);details=db.Column(db.String(255));created_at=db.Column(db.DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    event = db.Column(db.String(50), nullable=False)
+    outcome = db.Column(db.String(20), nullable=False)
+    details = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+
+
+class Action(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    assessment_id = db.Column(db.Integer, db.ForeignKey("assessment.id"), nullable=False, index=True)
+    question_code = db.Column(db.String(10), nullable=False)
+    function = db.Column(db.String(30), nullable=False)
+    title = db.Column(db.Text, nullable=False)
+    recommendation = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.String(20), nullable=False)
+    owner = db.Column(db.String(100))
+    due_date = db.Column(db.Date)
+    status = db.Column(db.String(20), default="Open", nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    assessment = db.relationship("Assessment")
+    __table_args__ = (db.UniqueConstraint("assessment_id", "question_code"),)
+
+
+class AdminInvite(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, index=True)
+    fullname = db.Column(db.String(100), nullable=False)
+    organisation = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(30), nullable=False, default="Administrator")
+    token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    accepted_at = db.Column(db.DateTime(timezone=True))
+    revoked = db.Column(db.Boolean, default=False)
+    email_status = db.Column(db.String(30), default="Link created")
+
+
+class ThreatCheck(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    target = db.Column(db.String(255), nullable=False)
+    target_type = db.Column(db.String(20), nullable=False)
+    risk = db.Column(db.String(20), nullable=False)
+    summary = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+
+
 @login_manager.user_loader
-def load_user(uid):return db.session.get(User,int(uid))
+def load_user(uid):
+    try:
+        raw_id, _, fingerprint = str(uid).partition(":")
+        user = db.session.get(User, int(raw_id))
+    except (TypeError, ValueError):
+        return None
+    if not user or not fingerprint or user.get_id() != uid or user.must_reset:
+        return None
+    return user
+
+
+# ------------------------------------------------------------------ roles
+def is_super(u=None):
+    u = u or current_user
+    return bool(u and u.is_authenticated and app.config["SUPERADMIN_EMAIL"] and u.email.lower() == app.config["SUPERADMIN_EMAIL"])
+
+
+def is_admin(u=None):
+    u = u or current_user
+    return bool(u and u.is_authenticated and (is_super(u) or u.role in ("Administrator", "Admin")))
+
+
+def display_role(u):
+    return "Super Admin" if is_super(u) else u.role
+
+
+def admin_required(fn):
+    @wraps(fn)
+    @login_required
+    def wrapper(*a, **kw):
+        if not is_admin():
+            audit("ADMIN_ACCESS", "BLOCKED", request.path)
+            abort(403)
+        return fn(*a, **kw)
+    return wrapper
+
+
+def super_required(fn):
+    @wraps(fn)
+    @login_required
+    def wrapper(*a, **kw):
+        if not is_super():
+            audit("SUPERADMIN_ACCESS", "BLOCKED", request.path)
+            abort(403)
+        return fn(*a, **kw)
+    return wrapper
+
+
+# ------------------------------------------------------------------ forms
+def strong(form, field):
+    p = field.data or ""
+    classes = sum([any(c.islower() for c in p), any(c.isupper() for c in p), any(c.isdigit() for c in p),
+                   any(not c.isalnum() for c in p)])
+    if len(p) < 12 or classes < 3:
+        raise ValidationError("Use 12+ characters with three of: uppercase, lowercase, number, symbol.")
+
+
+ROLE_CHOICES = [("Assessor", "Assessor"), ("Organisation Manager", "Organisation Manager")]
+
 
 class LoginForm(FlaskForm):
- email=StringField('Email address',validators=[DataRequired(),Email(),Length(max=255)])
- password=PasswordField('Password',validators=[DataRequired(),Length(min=8,max=128)])
- remember=BooleanField('Keep me signed in')
- submit=SubmitField('Sign in securely')
+    email = StringField("Email address", validators=[DataRequired(), Email(), Length(max=255)])
+    password = PasswordField("Password or one-time reset code", validators=[DataRequired(), Length(min=8, max=128)])
+    remember = BooleanField("Keep me signed in for 7 days")
+    submit = SubmitField("Sign in securely")
+
+
 class SignupForm(FlaskForm):
- fullname=StringField('Full name',validators=[DataRequired(),Length(min=2,max=100)])
- email=StringField('Email address',validators=[DataRequired(),Email(),Length(max=255)])
- organisation=StringField('Bank / organisation',validators=[DataRequired(),Length(min=2,max=150)])
- role=SelectField('Role',choices=[('Assessor','Assessor'),('Organisation Manager','Organisation Manager')],validators=[DataRequired()])
- password=PasswordField('Password',validators=[DataRequired(),Length(min=12,max=128)])
- confirm=PasswordField('Confirm password',validators=[DataRequired(),EqualTo('password')])
- terms=BooleanField('I confirm this is fictional academic data',validators=[DataRequired()])
- submit=SubmitField('Create secure account')
- def validate_email(self,f):
-  if User.query.filter_by(email=f.data.strip().lower()).first():raise ValidationError('An account with this email already exists.')
+    fullname = StringField("Full name", validators=[DataRequired(), Length(min=2, max=100)])
+    email = StringField("Work email", validators=[DataRequired(), Email(), Length(max=255)])
+    organisation = StringField("Organisation", validators=[DataRequired(), Length(min=2, max=150)])
+    role = SelectField("Role", choices=ROLE_CHOICES)
+    password = PasswordField("Password", validators=[DataRequired(), Length(max=128), strong])
+    confirm = PasswordField("Confirm password", validators=[DataRequired(), EqualTo("password", "Passwords must match.")])
+    terms = BooleanField("I confirm I will only enter fictional academic data", validators=[DataRequired("Please confirm.")])
+    submit = SubmitField("Create secure account")
+
+    def validate_email(self, f):
+        if User.query.filter_by(email=f.data.strip().lower()).first():
+            raise ValidationError("An account with this email already exists.")
+
+
+class InviteForm(FlaskForm):
+    fullname = StringField("Full name", validators=[DataRequired(), Length(max=100)])
+    email = StringField("Email", validators=[DataRequired(), Email(), Length(max=255)])
+    organisation = StringField("Organisation", validators=[DataRequired(), Length(max=150)])
+    role = SelectField("Role", choices=[("Administrator", "Administrator")] + ROLE_CHOICES)
+    submit = SubmitField("Create secure invitation")
+
+
+class NewPasswordForm(FlaskForm):
+    password = PasswordField("New password", validators=[DataRequired(), Length(max=128), strong])
+    confirm = PasswordField("Confirm new password", validators=[DataRequired(), EqualTo("password", "Passwords must match.")])
+    submit = SubmitField("Save new password")
+
+
+# ------------------------------------------------------------------ request hooks
+@app.before_request
+def assign_request_id():
+    g.request_id = secrets.token_hex(6)
+
 
 @app.after_request
-def headers(r):
- r.headers['X-Content-Type-Options']='nosniff';r.headers['X-Frame-Options']='DENY';r.headers['Referrer-Policy']='strict-origin-when-cross-origin';r.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()';r.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; form-action 'self'";r.headers['Cache-Control']='no-store';return r
+def security_headers(r):
+    r.headers.update({
+        "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+        "Cross-Origin-Opener-Policy": "same-origin", "Cache-Control": "no-store",
+        "X-Request-ID": g.get("request_id", ""),
+        "Content-Security-Policy": ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+                                    "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
+                                    "form-action 'self'"),
+    })
+    if app.config["PRODUCTION"]:
+        r.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return r
 
-def audit(event,outcome,details='',user=None):db.session.add(Audit(user_id=(user or current_user).id if (user or current_user.is_authenticated) else None,event=event,outcome=outcome,details=details));db.session.commit()
+
+@app.context_processor
+def inject_globals():
+    return {"app_version": app.config["APP_VERSION"], "current_year": utcnow().year,
+            "is_admin_user": is_admin(), "is_superadmin": is_super(), "display_role": display_role,
+            "super_email": app.config["SUPERADMIN_EMAIL"]}
+
+
+def audit(event, outcome, details="", user=None):
+    try:
+        uid = user.id if user is not None else (current_user.id if current_user.is_authenticated else None)
+        db.session.add(Audit(user_id=uid, event=event, outcome=outcome, details=(details or "")[:255]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        log.exception("Audit write failed")
+
+
+# ------------------------------------------------------------------ helpers
 def owned(a):
- if a.user_id!=current_user.id:abort(403)
-def level(s):return 'Critical' if s<40 else 'Weak' if s<60 else 'Developing' if s<75 else 'Good' if s<90 else 'Strong'
+    if a.user_id != current_user.id and not is_admin():
+        audit("ACCESS_DENIED", "BLOCKED", f"Assessment {a.id}")
+        abort(403)
+
+
+def get_assessment(aid):
+    a = db.session.get(Assessment, aid)
+    if a is None:
+        abort(404)
+    owned(a)
+    return a
+
+
+def level(s):
+    return report_builder.level(s)
+
+
+def function_scores(a):
+    out = {}
+    for fn in CORE:
+        vals = [(x.value - 1) / 4 * 100 for x in a.answers if x.question.function == fn and not x.is_na and x.value]
+        out[fn] = round(sum(vals) / len(vals), 1) if vals else None
+    return out
+
+
+def weak_answers(a):
+    return sorted([x for x in a.answers if x.value and x.value <= 2], key=lambda x: (x.value, x.question.order))
+
+
+def ensure_actions(a):
+    existing = {x.question_code for x in Action.query.filter_by(assessment_id=a.id)}
+    added = False
+    for x in weak_answers(a):
+        if x.question.code not in existing:
+            db.session.add(Action(assessment_id=a.id, question_code=x.question.code, function=x.question.function,
+                                  title=x.question.text, recommendation=RECS[x.question.function],
+                                  priority="Critical" if x.value == 1 else "High",
+                                  due_date=(utcnow() + timedelta(days=30 if x.value == 1 else 60)).date()))
+            added = True
+    if added:
+        db.session.commit()
+
+
+def user_assessment_ids(user=None):
+    user = user or current_user
+    return [a.id for a in Assessment.query.filter_by(user_id=user.id).all()]
+
+
+def ai_context(page=""):
+    latest = (Assessment.query.filter_by(user_id=current_user.id, status="Completed")
+              .order_by(Assessment.submitted_at.desc()).first())
+    ids = user_assessment_ids()
+    acts = Action.query.filter(Action.assessment_id.in_(ids)).all() if ids else []
+    open_acts = [x for x in acts if x.status in ("Open", "In Progress")]
+    last_check = ThreatCheck.query.filter_by(user_id=current_user.id).order_by(ThreatCheck.created_at.desc()).first()
+    ctx = {"role": display_role(current_user), "page": page, "open_actions": len(open_acts),
+           "critical": sum(1 for x in open_acts if x.priority == "Critical"),
+           "exposure": f"{last_check.risk} risk" if last_check else None, "score": None}
+    if latest:
+        weak = weak_answers(latest)
+        ctx.update(score=latest.overall_score, readiness=latest.readiness, functions=function_scores(latest),
+                   weak=[(w.question.code, w.question.function, w.question.text) for w in weak],
+                   critical_weak=sum(1 for w in weak if w.value == 1))
+    return ctx
+
+
 def seed():
- if Question.query.count():return
- data=json.loads((Path(__file__).parent/'questions.json').read_text())
- for i,x in enumerate(data):db.session.add(Question(code=x['code'],function=x['function'],text=x['text'],order=i))
- db.session.commit()
+    if Question.query.count():
+        return
+    for i, x in enumerate(json.loads((BASE / "questions.json").read_text(encoding="utf-8"))):
+        db.session.add(Question(code=x["code"], function=x["function"], text=x["text"], order=i))
+    db.session.commit()
 
-@app.route('/',methods=['GET','POST'])
-@app.route('/login',methods=['GET','POST'])
-@limiter.limit('10 per minute')
+
+def migrate():
+    """Additive, idempotent column migrations for existing Render databases."""
+    insp = inspect(db.engine)
+    cols = {c["name"] for c in insp.get_columns("user")}
+    ts = "TIMESTAMP WITH TIME ZONE" if db.engine.dialect.name == "postgresql" else "TIMESTAMP"
+    with db.engine.begin() as conn:
+        if "must_reset" not in cols:
+            conn.execute(text('ALTER TABLE "user" ADD COLUMN must_reset BOOLEAN NOT NULL DEFAULT FALSE'))
+        if "reset_expires" not in cols:
+            conn.execute(text(f'ALTER TABLE "user" ADD COLUMN reset_expires {ts}'))
+
+
+def send_graph_mail(to, subject, html):
+    c = app.config
+    if not all([c["GRAPH_TENANT_ID"], c["GRAPH_CLIENT_ID"], c["GRAPH_CLIENT_SECRET"], c["GRAPH_SENDER"]]):
+        return False, "Email service not configured - copy the secure link or code below and share it privately."
+    try:
+        client = msal.ConfidentialClientApplication(c["GRAPH_CLIENT_ID"],
+                                                    authority=f"https://login.microsoftonline.com/{c['GRAPH_TENANT_ID']}",
+                                                    client_credential=c["GRAPH_CLIENT_SECRET"])
+        tok = client.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        if "access_token" not in tok:
+            return False, "Email authentication failed - share the link or code manually."
+        body = {"message": {"subject": subject, "body": {"contentType": "HTML", "content": html},
+                            "toRecipients": [{"emailAddress": {"address": to}}]}, "saveToSentItems": True}
+        r = requests.post(f"https://graph.microsoft.com/v1.0/users/{c['GRAPH_SENDER']}/sendMail",
+                          headers={"Authorization": "Bearer " + tok["access_token"]}, json=body, timeout=15)
+        return (True, f"Email sent to {to}.") if r.status_code == 202 else (False, f"Email service returned {r.status_code}.")
+    except Exception:
+        log.exception("Graph mail failed")
+        return False, "Email could not be sent - share the link or code manually."
+
+
+# ------------------------------------------------------------------ errors
+def error_page(code, title, message):
+    return render_template("error.html", code=code, title=title, message=message,
+                           request_id=g.get("request_id", "")), code
+
+
+for _code, _title, _msg in [
+        (400, "Bad request", "The request could not be processed. Go back and try again."),
+        (403, "Access denied", "Your account does not have permission to view this resource."),
+        (404, "Page not found", "The page you requested does not exist or has moved."),
+        (429, "Too many requests", "For your protection this action is temporarily rate limited. Please wait and try again."),
+        (500, "Service unavailable", "Something went wrong on our side. The event has been logged.")]:
+    app.register_error_handler(_code, lambda e, c=_code, t=_title, m=_msg: error_page(c, t, m))
+
+
+@app.errorhandler(CSRFError)
+def csrf_error(e):
+    audit("CSRF_REJECTED", "BLOCKED", request.path)
+    return error_page(400, "Security check expired", "Your form session expired. Refresh the page and submit again.")
+
+
+# ------------------------------------------------------------------ public routes
+@app.get("/healthz")
+@limiter.exempt
+def healthz():
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify(status="ok", version=app.config["APP_VERSION"])
+    except Exception:
+        return jsonify(status="degraded"), 503
+
+
+@app.route("/", methods=["GET", "POST"])
+@app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def login():
- if current_user.is_authenticated:return redirect(url_for('dashboard'))
- f=LoginForm()
- if f.validate_on_submit():
-  u=User.query.filter_by(email=f.email.data.strip().lower()).first()
-  if u and u.locked_until and u.locked_until>datetime.now(timezone.utc):flash('This account is temporarily locked. Try again later.','error');return render_template('login.html',form=f),429
-  if u and u.is_active and u.check_password(f.password.data):
-   u.failed_attempts=0;u.locked_until=None;db.session.commit();session.clear();session.permanent=True;login_user(u,remember=f.remember.data,fresh=True);audit('LOGIN','SUCCESS','Authenticated session created',u);return redirect(url_for('dashboard'))
-  if u:
-   u.failed_attempts+=1
-   if u.failed_attempts>=5:u.locked_until=datetime.now(timezone.utc)+timedelta(minutes=15)
-   db.session.commit()
-  audit('LOGIN','FAILED','Invalid credentials',u);flash('The email address or password is incorrect.','error')
- return render_template('login.html',form=f)
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+    form = LoginForm()
+    if form.validate_on_submit():
+        u = User.query.filter_by(email=form.email.data.strip().lower()).first()
+        if u and u.locked():
+            audit("LOGIN", "BLOCKED", "Temporary lockout", u)
+            flash("This account is temporarily locked after repeated failed attempts. Try again in 15 minutes.", "error")
+            return render_template("login.html", form=form), 429
+        if u and u.active and u.check_password(form.password.data):
+            u.failed_attempts, u.locked_until = 0, None
+            if u.must_reset:
+                if aware(u.reset_expires) and aware(u.reset_expires) < utcnow():
+                    db.session.commit()
+                    audit("PASSWORD_RESET", "EXPIRED", "Reset code expired", u)
+                    flash("Your one-time reset code has expired. Ask your administrator for a new one.", "error")
+                    return render_template("login.html", form=form)
+                db.session.commit()
+                session.clear()
+                session["reset_uid"] = u.id
+                session["reset_at"] = utcnow().isoformat()
+                audit("PASSWORD_RESET", "CODE_ACCEPTED", "Reset code verified", u)
+                return redirect(url_for("set_password"))
+            db.session.commit()
+            session.clear()
+            session.permanent = True
+            login_user(u, remember=form.remember.data, fresh=True)
+            audit("LOGIN", "SUCCESS", "Authenticated session created", u)
+            return redirect(url_for("dashboard"))
+        if u:
+            u.failed_attempts = (u.failed_attempts or 0) + 1
+            if u.failed_attempts >= 5:
+                u.locked_until = utcnow() + timedelta(minutes=15)
+            db.session.commit()
+        audit("LOGIN", "FAILED", "Invalid credentials", u)
+        flash("The email address or password is incorrect.", "error")
+    return render_template("login.html", form=form)
 
-@app.route('/signup',methods=['GET','POST'])
-@limiter.limit('20 per hour')
+
+@app.route("/set-password", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def set_password():
+    uid = session.get("reset_uid")
+    started = session.get("reset_at")
+    if not uid or not started or utcnow() - datetime.fromisoformat(started) > timedelta(minutes=10):
+        session.pop("reset_uid", None)
+        flash("Sign in with your one-time reset code to create a new password.", "warning")
+        return redirect(url_for("login"))
+    u = db.session.get(User, uid)
+    if not u or not u.must_reset:
+        session.clear()
+        return redirect(url_for("login"))
+    form = NewPasswordForm()
+    if form.validate_on_submit():
+        if u.check_password(form.password.data):
+            flash("Choose a new password that is different from the reset code.", "error")
+        else:
+            u.set_password(form.password.data)
+            u.must_reset, u.reset_expires = False, None
+            db.session.commit()
+            session.clear()
+            session.permanent = True
+            login_user(u, fresh=True)
+            audit("PASSWORD_RESET", "SUCCESS", "User created a new password", u)
+            flash("Your new password is saved and all previous sessions were signed out.", "success")
+            return redirect(url_for("dashboard"))
+    return render_template("set_password.html", form=form, user=u)
+
+
+@app.route("/signup", methods=["GET", "POST"])
+@limiter.limit("20 per hour", methods=["POST"])
 def signup():
- if current_user.is_authenticated:return redirect(url_for('dashboard'))
- f=SignupForm()
- if f.validate_on_submit():
-  u=User(fullname=f.fullname.data.strip(),email=f.email.data.strip().lower(),organisation=f.organisation.data.strip(),role=f.role.data);u.set_password(f.password.data);db.session.add(u);db.session.commit();audit('SIGNUP','SUCCESS','Self-registration completed',u);flash('Account created. You can now sign in.','success');return redirect(url_for('login'))
- return render_template('signup.html',form=f)
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+    form = SignupForm()
+    if form.validate_on_submit():
+        u = User(fullname=form.fullname.data.strip(), email=form.email.data.strip().lower(),
+                 organisation=form.organisation.data.strip(), role=form.role.data)
+        u.set_password(form.password.data)
+        db.session.add(u)
+        db.session.commit()
+        audit("SIGNUP", "SUCCESS", "Self-registration", u)
+        flash("Account created. Sign in to continue.", "success")
+        return redirect(url_for("login"))
+    return render_template("signup.html", form=form)
 
-@app.post('/logout')
+
+@app.post("/logout")
 @login_required
-def logout():audit('LOGOUT','SUCCESS','Session ended');logout_user();session.clear();flash('You have been signed out securely.','success');return redirect(url_for('login'))
-@app.get('/about')
-def about():return render_template('about.html')
-@app.get('/dashboard')
+def logout():
+    audit("LOGOUT", "SUCCESS", "Session ended")
+    logout_user()
+    session.clear()
+    flash("You have been signed out securely.", "success")
+    return redirect(url_for("login"))
+
+
+@app.get("/about")
+def about():
+    return render_template("about.html")
+
+
+# ------------------------------------------------------------------ workspace
+@app.get("/dashboard")
 @login_required
 def dashboard():
- assessments=Assessment.query.filter_by(user_id=current_user.id).order_by(Assessment.created_at.desc()).all();latest=next((a for a in assessments if a.status=='Completed'),None);return render_template('dashboard.html',assessments=assessments,latest=latest)
-@app.post('/assessment/new')
+    assessments = Assessment.query.filter_by(user_id=current_user.id).order_by(Assessment.created_at.desc()).all()
+    completed = [a for a in assessments if a.status == "Completed"]
+    latest = completed[0] if completed else None
+    ids = [a.id for a in assessments]
+    acts = Action.query.filter(Action.assessment_id.in_(ids)).all() if ids else []
+    open_acts = [x for x in acts if x.status in ("Open", "In Progress")]
+    last_check = ThreatCheck.query.filter_by(user_id=current_user.id).order_by(ThreatCheck.created_at.desc()).first()
+    trend = [{"label": a.submitted_at.strftime("%d %b") if a.submitted_at else f"#{a.id}", "score": a.overall_score or 0}
+             for a in reversed(completed[:8])]
+    hour = (utcnow() + timedelta(hours=2)).hour  # SAST
+    greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+    return render_template("dashboard.html", assessments=assessments, latest=latest,
+                           scores=function_scores(latest) if latest else None, trend=trend,
+                           open_actions=len(open_acts), critical=sum(1 for x in open_acts if x.priority == "Critical"),
+                           overdue=sum(1 for x in open_acts if x.due_date and x.due_date < date.today()),
+                           last_check=last_check, greeting=greeting, first_name=current_user.fullname.split()[0])
+
+
+@app.post("/assessment/new")
 @login_required
 def new_assessment():
- a=Assessment(user_id=current_user.id,organisation=current_user.organisation);db.session.add(a);db.session.commit();return redirect(url_for('assessment',aid=a.id,fn='Govern'))
-@app.route('/assessment/<int:aid>/<fn>',methods=['GET','POST'])
+    a = Assessment(user_id=current_user.id, organisation=current_user.organisation)
+    db.session.add(a)
+    db.session.commit()
+    audit("ASSESSMENT_CREATE", "SUCCESS", f"Assessment {a.id}")
+    return redirect(url_for("assessment", aid=a.id, fn="Govern"))
+
+
+@app.route("/assessment/<int:aid>/<fn>", methods=["GET", "POST"])
 @login_required
-def assessment(aid,fn):
- a=db.session.get(Assessment,aid) or abort(404);owned(a);functions=CORE+['AI Preparedness']
- if fn not in functions:abort(404)
- qs=Question.query.filter_by(function=fn).order_by(Question.order).all();existing={x.question_id:x for x in a.answers}
- if request.method=='POST':
-  for q in qs:
-   raw=request.form.get(f'q{q.id}');note=request.form.get(f'n{q.id}','').strip();ans=existing.get(q.id) or Answer(assessment_id=a.id,question_id=q.id)
-   if raw=='NA':ans.value=None;ans.is_na=True;ans.note=note
-   elif raw in '12345':ans.value=int(raw);ans.is_na=False;ans.note=note
-   else:continue
-   db.session.add(ans)
-  db.session.commit();flash(f'{fn} responses saved.','success');action=request.form.get('action');i=functions.index(fn)
-  if action=='next' and i<len(functions)-1:return redirect(url_for('assessment',aid=aid,fn=functions[i+1]))
-  if action=='submit':return redirect(url_for('review',aid=aid))
- return render_template('assessment.html',a=a,fn=fn,functions=functions,questions=qs,existing=existing)
-@app.get('/assessment/<int:aid>/review')
+def assessment(aid, fn):
+    a = get_assessment(aid)
+    if a.status == "Completed":
+        return redirect(url_for("results", aid=aid))
+    if fn not in ALL:
+        abort(404)
+    questions = Question.query.filter_by(function=fn).order_by(Question.order).all()
+    existing = {x.question_id: x for x in a.answers}
+    if request.method == "POST":
+        for q in questions:
+            raw = request.form.get(f"q{q.id}", "")
+            if raw not in {"1", "2", "3", "4", "5", "NA"}:
+                continue
+            ans = existing.get(q.id) or Answer(assessment_id=aid, question_id=q.id)
+            ans.is_na = raw == "NA"
+            ans.value = None if ans.is_na else int(raw)
+            ans.note = request.form.get(f"n{q.id}", "").strip()[:500]
+            db.session.add(ans)
+        db.session.commit()
+        flash(f"{fn} responses saved securely.", "success")
+        i = ALL.index(fn)
+        act = request.form.get("action")
+        if act == "next" and i < len(ALL) - 1:
+            return redirect(url_for("assessment", aid=aid, fn=ALL[i + 1]))
+        if act == "submit":
+            return redirect(url_for("review", aid=aid))
+        return redirect(url_for("assessment", aid=aid, fn=fn))
+    answered = sum(1 for x in a.answers if x.value is not None or x.is_na)
+    return render_template("assessment.html", a=a, fn=fn, functions=ALL, questions=questions, existing=existing,
+                           answered=answered, total=Question.query.count())
+
+
+@app.get("/assessment/<int:aid>/review")
 @login_required
-def review(aid):a=db.session.get(Assessment,aid) or abort(404);owned(a);return render_template('review.html',a=a,total=Question.query.filter(Question.function!='AI Preparedness').count(),answered=sum(1 for x in a.answers if x.question.function!='AI Preparedness' and (x.value is not None or x.is_na)))
-@app.post('/assessment/<int:aid>/submit')
+def review(aid):
+    a = get_assessment(aid)
+    total = Question.query.filter(Question.function != "AI Preparedness").count()
+    answered = sum(1 for x in a.answers if x.question.function != "AI Preparedness" and (x.value is not None or x.is_na))
+    missing_na = [x.question.code for x in a.answers if x.is_na and not x.note]
+    return render_template("review.html", a=a, total=total, answered=answered, missing_na=missing_na)
+
+
+@app.post("/assessment/<int:aid>/submit")
 @login_required
 def submit(aid):
- a=db.session.get(Assessment,aid) or abort(404);owned(a);core=[q for q in Question.query.filter(Question.function!='AI Preparedness').all()];answered={x.question_id for x in a.answers if x.value is not None or x.is_na}
- if not all(q.id in answered for q in core):flash('Complete all core questions before submitting.','error');return redirect(url_for('review',aid=aid))
- scores={}
- for fn in CORE:
-  vals=[(x.value-1)/4*100 for x in a.answers if x.question.function==fn and not x.is_na and x.value]
-  scores[fn]=sum(vals)/len(vals) if vals else None
- usable=[f for f in CORE if scores[f] is not None];den=sum(WEIGHTS[f] for f in usable);a.overall_score=round(sum(scores[f]*WEIGHTS[f] for f in usable)/den,1) if den else None;a.readiness=level(a.overall_score) if a.overall_score is not None else 'Not assessable';a.status='Completed';a.submitted_at=datetime.now(timezone.utc);db.session.commit();audit('ASSESSMENT_SUBMIT','SUCCESS',f'Assessment {a.id}');return redirect(url_for('results',aid=aid))
-@app.get('/assessment/<int:aid>/results')
+    a = get_assessment(aid)
+    core = Question.query.filter(Question.function != "AI Preparedness").all()
+    answered = {x.question_id for x in a.answers if x.value is not None or x.is_na}
+    if not all(q.id in answered for q in core):
+        flash("Complete all core questions before submitting.", "error")
+        return redirect(url_for("review", aid=aid))
+    sc = function_scores(a)
+    usable = [f for f in CORE if sc[f] is not None]
+    den = sum(WEIGHTS[f] for f in usable)
+    a.overall_score = round(sum(sc[f] * WEIGHTS[f] for f in usable) / den, 1) if den else None
+    a.readiness = level(a.overall_score)
+    a.status = "Completed"
+    a.submitted_at = utcnow()
+    db.session.commit()
+    ensure_actions(a)
+    audit("ASSESSMENT_SUBMIT", "SUCCESS", f"Assessment {a.id}")
+    return redirect(url_for("results", aid=aid))
+
+
+@app.get("/assessment/<int:aid>/results")
 @login_required
 def results(aid):
- a=db.session.get(Assessment,aid) or abort(404);owned(a);scores={fn:None for fn in CORE}
- for fn in CORE:
-  vals=[(x.value-1)/4*100 for x in a.answers if x.question.function==fn and not x.is_na and x.value];scores[fn]=round(sum(vals)/len(vals),1) if vals else None
- risks=[x for x in a.answers if x.value and x.value<=2];return render_template('results.html',a=a,scores=scores,risks=risks)
+    a = get_assessment(aid)
+    if a.status != "Completed":
+        return redirect(url_for("assessment", aid=aid, fn="Govern"))
+    ensure_actions(a)
+    return render_template("results.html", a=a, scores=function_scores(a), risks=weak_answers(a), recs=RECS)
 
 
 @app.get("/assessment/<int:aid>/report.pdf")
 @login_required
 def report(aid):
-    assessment_record = db.session.get(Assessment, aid)
-
-    if assessment_record is None:
+    a = get_assessment(aid)
+    if a.status != "Completed":
         abort(404)
+    weak = weak_answers(a)
+    sc = function_scores(a)
+    ctx = {"score": a.overall_score, "readiness": a.readiness, "functions": sc,
+           "weak": [(w.question.code, w.question.function, w.question.text) for w in weak],
+           "critical_weak": sum(1 for w in weak if w.value == 1)}
+    pdf = report_builder.build(a, sc, weak, RECS, shieldai.executive_summary(ctx), app.config["APP_VERSION"], BASE)
+    audit("REPORT_GENERATE", "SUCCESS", f"Assessment {a.id}")
+    return send_file(pdf, mimetype="application/pdf", as_attachment=True,
+                     download_name=f"RansomwareShield-SA-Readiness-Report-RSA-{a.id:04d}.pdf")
 
-    owned(assessment_record)
 
-    # ---------------------------------------------------------
-    # CALCULATE FUNCTION SCORES
-    # ---------------------------------------------------------
+@app.get("/actions")
+@login_required
+def actions():
+    ids = [a.id for a in Assessment.query.all()] if is_admin() else user_assessment_ids()
+    items = (Action.query.filter(Action.assessment_id.in_(ids)).order_by(Action.status, Action.due_date).all()) if ids else []
+    return render_template("actions.html", items=items, today=date.today())
 
-    function_scores = {}
 
-    for function_name in CORE:
+@app.post("/actions/<int:iid>")
+@login_required
+def action_update(iid):
+    x = db.session.get(Action, iid) or abort(404)
+    owned(x.assessment)
+    x.owner = request.form.get("owner", "").strip()[:100] or None
+    if request.form.get("status") in ("Open", "In Progress", "Remediated", "Accepted Risk"):
+        x.status = request.form["status"]
+    try:
+        x.due_date = date.fromisoformat(request.form["due_date"]) if request.form.get("due_date") else None
+    except ValueError:
+        flash("Invalid due date ignored.", "warning")
+    db.session.commit()
+    audit("ACTION_UPDATE", "SUCCESS", f"Action {x.id} -> {x.status}")
+    flash(f"{x.question_code} updated.", "success")
+    return redirect(url_for("actions"))
 
-        values = [
-            (answer.value - 1) / 4 * 100
-            for answer in assessment_record.answers
-            if answer.question.function == function_name
-            and not answer.is_na
-            and answer.value is not None
-        ]
 
-        if values:
-            function_scores[function_name] = round(
-                sum(values) / len(values),
-                1
-            )
+@app.get("/security")
+@login_required
+def security():
+    events = Audit.query.filter_by(user_id=current_user.id).order_by(Audit.created_at.desc()).limit(30).all()
+    controls = [("TLS-encrypted transport (HTTPS + HSTS)", app.config["PRODUCTION"]),
+                ("Secure, HttpOnly, SameSite session cookies", app.config["SESSION_COOKIE_SECURE"]),
+                ("CSRF tokens on every form", True), ("scrypt password hashing", True),
+                ("Login throttling and 15-minute lockout", True), ("Content Security Policy", True),
+                ("Session revocation on password change", True), ("Role-based access control", True),
+                ("Tamper-evident audit trail", True)]
+    return render_template("security.html", events=events, controls=controls)
+
+
+# ------------------------------------------------------------------ threat exposure
+@app.get("/threat-exposure")
+@login_required
+def threat_exposure():
+    history = ThreatCheck.query.filter_by(user_id=current_user.id).order_by(ThreatCheck.created_at.desc()).limit(10).all()
+    return render_template("threat.html", history=history)
+
+
+@app.post("/threat-exposure/scan")
+@login_required
+@limiter.limit("20 per hour")
+def threat_scan():
+    data = request.get_json(silent=True) or {}
+    target = str(data.get("target", ""))[:255]
+    domain, email = threat.normalise(target)
+    if not domain:
+        return jsonify(error="Enter a valid public domain (example.co.za) or email address."), 400
+    result = threat.check(domain, email, app.config)
+    if result.get("error"):
+        return jsonify(error=result["error"]), 422
+    db.session.add(ThreatCheck(user_id=current_user.id, target=target.strip().lower(),
+                               target_type="email" if email else "domain", risk=result["risk"],
+                               summary=result["summary"]))
+    db.session.commit()
+    audit("THREAT_CHECK", "SUCCESS", f"{domain} {result['risk']}")
+    return jsonify(result)
+
+
+# ------------------------------------------------------------------ ShieldAI
+@app.post("/ai/chat")
+@login_required
+@limiter.limit("40 per minute")
+def ai_chat():
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("question", ""))[:800]
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    result = shieldai.answer(app.config, question, history, ai_context(str(data.get("page", ""))[:60]))
+    audit("SHIELDAI", "SUCCESS", question[:90])
+    return jsonify(result)
+
+
+@app.get("/ai/tour")
+@login_required
+def ai_tour():
+    steps = [s for s in shieldai.TOUR_STEPS if s["target"] != "nav-management" or is_admin()]
+    return jsonify(steps=steps)
+
+
+# ------------------------------------------------------------------ Management Centre
+def invite_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="admin-invite")
+
+
+@app.route("/management", methods=["GET", "POST"])
+@admin_required
+def management():
+    form = InviteForm()
+    new_link = None
+    if form.validate_on_submit():
+        email = form.email.data.strip().lower()
+        if User.query.filter_by(email=email).first():
+            flash("That email already has an account.", "error")
+        elif form.role.data == "Administrator" and not is_super():
+            flash("Only the Super Admin can invite Administrators.", "error")
         else:
-            function_scores[function_name] = None
+            raw = secrets.token_urlsafe(32)
+            inv = AdminInvite(email=email, fullname=form.fullname.data.strip(), organisation=form.organisation.data.strip(),
+                              role=form.role.data, token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                              created_by=current_user.id, expires_at=utcnow() + timedelta(hours=48))
+            db.session.add(inv)
+            db.session.commit()
+            token = invite_serializer().dumps({"id": inv.id, "raw": raw})
+            new_link = app.config["PUBLIC_BASE_URL"] + url_for("accept_invite", token=token)
+            ok, msg = send_graph_mail(email, "Your RansomwareShield-SA invitation",
+                                      f"<p>Hello {inv.fullname},</p><p>You have been invited to RansomwareShield-SA as "
+                                      f"<b>{inv.role}</b>.</p><p><a href='{new_link}'>Accept your secure invitation</a></p>"
+                                      "<p>The link expires in 48 hours and can be used once.</p>")
+            inv.email_status = "Emailed" if ok else "Link created"
+            db.session.commit()
+            audit("ADMIN_INVITE", "SUCCESS", f"{email} as {inv.role}")
+            flash(msg, "success" if ok else "warning")
+    users = User.query.order_by(User.created_at.desc()).all()
+    invites = AdminInvite.query.order_by(AdminInvite.created_at.desc()).limit(25).all()
+    feed = Audit.query.order_by(Audit.created_at.desc()).limit(15).all() if is_super() else []
+    names = {u.id: u.fullname for u in users}
+    now = utcnow()
+    stats = {"users": len(users), "admins": sum(1 for u in users if is_admin(u)),
+             "active": sum(1 for u in users if u.active),
+             "pending": sum(1 for i in invites if not i.accepted_at and not i.revoked and aware(i.expires_at) > now),
+             "assessments": Assessment.query.filter_by(status="Completed").count(),
+             "events24": Audit.query.filter(Audit.created_at >= now - timedelta(hours=24)).count(),
+             "blocked24": Audit.query.filter(Audit.created_at >= now - timedelta(hours=24),
+                                             Audit.outcome.in_(["BLOCKED", "FAILED"])).count()}
+    reset_code = session.pop("reset_code", None)
+    return render_template("management.html", form=form, users=users, invites=invites, stats=stats,
+                           new_link=new_link, feed=feed, names=names, reset_code=reset_code, now=now)
 
-    weak_answers = [
-        answer
-        for answer in assessment_record.answers
-        if answer.value is not None
-        and answer.value <= 2
-    ]
 
-    # ---------------------------------------------------------
-    # READINESS BADGE CONFIGURATION
-    # ---------------------------------------------------------
-
-    readiness_name = assessment_record.readiness or "Not assessable"
-
-    if readiness_name == "Strong":
-
-        badge_text = "STRONG PREPAREDNESS"
-        badge_colour = colors.HexColor("#157347")
-        badge_background = colors.HexColor("#EAF8EF")
-
-    elif readiness_name == "Good":
-
-        badge_text = "GOOD PREPAREDNESS"
-        badge_colour = colors.HexColor("#6F2CFF")
-        badge_background = colors.HexColor("#EEE8FF")
-
-    elif readiness_name == "Developing":
-
-        badge_text = "DEVELOPING READINESS"
-        badge_colour = colors.HexColor("#996500")
-        badge_background = colors.HexColor("#FFF6DA")
-
-    elif readiness_name == "Weak":
-
-        badge_text = "IMPROVEMENT REQUIRED"
-        badge_colour = colors.HexColor("#B54708")
-        badge_background = colors.HexColor("#FFF1E6")
-
+@app.post("/management/user/<int:uid>")
+@admin_required
+def manage_user(uid):
+    u = db.session.get(User, uid) or abort(404)
+    if is_super(u) or u.id == current_user.id:
+        flash("You cannot change this account from here.", "error")
+        return redirect(url_for("management"))
+    if is_admin(u) and not is_super():
+        flash("Only the Super Admin can change another Administrator.", "error")
+        return redirect(url_for("management"))
+    action = request.form.get("action")
+    if action == "toggle":
+        u.active = not u.active
+        detail = "activated" if u.active else "suspended"
+    elif action == "role":
+        role = request.form.get("role")
+        if role not in ("Administrator", "Organisation Manager", "Assessor"):
+            abort(400)
+        if role == "Administrator" and not is_super():
+            flash("Only the Super Admin can grant Administrator.", "error")
+            return redirect(url_for("management"))
+        u.role = role
+        detail = f"role {role}"
     else:
-
-        badge_text = "PRIORITY IMPROVEMENT REQUIRED"
-        badge_colour = colors.HexColor("#B42318")
-        badge_background = colors.HexColor("#FFF0EE")
-
-    # ---------------------------------------------------------
-    # CREATE PDF DOCUMENT
-    # ---------------------------------------------------------
-
-    pdf_buffer = BytesIO()
-
-    document = SimpleDocTemplate(
-        pdf_buffer,
-        pagesize=A4,
-        rightMargin=17 * mm,
-        leftMargin=17 * mm,
-        topMargin=15 * mm,
-        bottomMargin=17 * mm,
-        title=(
-            f"RansomwareShield-SA Assessment "
-            f"{assessment_record.id}"
-        ),
-        author="RansomwareShield-SA Group 7"
-    )
-
-    styles = getSampleStyleSheet()
-
-    brand_purple = colors.HexColor("#6F2CFF")
-    brand_navy = colors.HexColor("#07051B")
-    brand_cyan = colors.HexColor("#31C8FF")
-    soft_background = colors.HexColor("#F3F5FB")
-    border_colour = colors.HexColor("#DFE3EF")
-    text_colour = colors.HexColor("#20233A")
-    muted_colour = colors.HexColor("#70758F")
-
-    story = []
-
-    # =========================================================
-    # PROFESSIONAL REPORT HEADER
-    # =========================================================
-
-    logo_path = (
-        Path(__file__).resolve().parent
-        / "static"
-        / "logo.jpg"
-    )
-
-    logo_content = ""
-
-    if logo_path.exists():
-
-        from reportlab.platypus import Image
-
-        logo_content = Image(
-            str(logo_path),
-            width=30 * mm,
-            height=22 * mm
-        )
-
-        logo_content.hAlign = "CENTER"
-
-    title_content = Paragraph(
-        """
-        <font color="#31C8FF" size="8">
-            <b>CYBERSECURITY READINESS ASSESSMENT</b>
-        </font>
-        <br/>
-        <font color="#FFFFFF" size="18">
-            <b>RansomwareShield-SA</b>
-        </font>
-        <br/>
-        <font color="#D9DEF2" size="9">
-            Cybersecurity Readiness Assessment Report
-        </font>
-        <br/>
-        <font color="#9CA6C9" size="7">
-            Official Academic Prototype
-        </font>
-        """,
-        styles["BodyText"]
-    )
-
-    score_display = (
-        "N/A"
-        if assessment_record.overall_score is None
-        else f"{assessment_record.overall_score}%"
-    )
-
-    score_content = Paragraph(
-        f"""
-        <para align="center">
-            <font color="#FFFFFF" size="25">
-                <b>{score_display}</b>
-            </font>
-            <br/>
-            <font color="#31C8FF" size="11">
-                <b>{readiness_name.upper()}</b>
-            </font>
-            <br/>
-            <font color="#B8C0DF" size="6">
-                OVERALL READINESS
-            </font>
-        </para>
-        """,
-        styles["BodyText"]
-    )
-
-    header_table = Table(
-        [
-            [
-                logo_content,
-                title_content,
-                score_content
-            ]
-        ],
-        colWidths=[
-            37 * mm,
-            87 * mm,
-            43 * mm
-        ],
-        rowHeights=[
-            40 * mm
-        ]
-    )
-
-    header_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    brand_navy
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    12
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    12
-                ),
-                (
-                    "LINEBEFORE",
-                    (2, 0),
-                    (2, 0),
-                    0.7,
-                    colors.HexColor("#373064")
-                )
-            ]
-        )
-    )
-
-    story.append(header_table)
-    story.append(Spacer(1, 7 * mm))
-
-    # =========================================================
-    # DEMONSTRATION READINESS BADGE
-    # =========================================================
-
-    badge_content = Paragraph(
-        f"""
-        <para align="center">
-            <font color="{badge_colour.hexval()}" size="7">
-                <b>DEMO READINESS ASSESSMENT</b>
-            </font>
-            <br/>
-            <font color="#07051B" size="16">
-                <b>{badge_text}</b>
-            </font>
-            <br/>
-            <font color="#70758F" size="8">
-                Project-defined readiness result.
-                This result does not represent certification
-                or guarantee protection against ransomware.
-            </font>
-        </para>
-        """,
-        styles["BodyText"]
-    )
-
-    badge_box = Table(
-        [
-            [
-                badge_content
-            ]
-        ],
-        colWidths=[
-            167 * mm
-        ],
-        rowHeights=[
-            27 * mm
-        ]
-    )
-
-    badge_box.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    badge_background
-                ),
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    1,
-                    badge_colour
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    14
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    14
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                )
-            ]
-        )
-    )
-
-    story.append(badge_box)
-    story.append(Spacer(1, 9 * mm))
-
-    # =========================================================
-    # ASSESSMENT DETAILS
-    # =========================================================
-
-    story.append(
-        Paragraph(
-            """
-            <font color="#07051B" size="13">
-                <b>Assessment Details</b>
-            </font>
-            """,
-            styles["BodyText"]
-        )
-    )
-
-    story.append(Spacer(1, 3 * mm))
-
-    completed_value = (
-        assessment_record.submitted_at.strftime(
-            "%d %B %Y %H:%M UTC"
-        )
-        if assessment_record.submitted_at
-        else "Not recorded"
-    )
-
-    details_table = Table(
-        [
-            [
-                "Organisation",
-                assessment_record.organisation
-            ],
-            [
-                "Assessor",
-                assessment_record.user.fullname
-            ],
-            [
-                "Role",
-                assessment_record.user.role
-            ],
-            [
-                "Assessment Reference",
-                f"RSA-{assessment_record.id:04d}"
-            ],
-            [
-                "Readiness Classification",
-                readiness_name
-            ],
-            [
-                "Completed",
-                completed_value
-            ]
-        ],
-        colWidths=[
-            48 * mm,
-            119 * mm
-        ]
-    )
-
-    details_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    soft_background
-                ),
-                (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (0, -1),
-                    brand_navy
-                ),
-                (
-                    "FONTNAME",
-                    (0, 0),
-                    (0, -1),
-                    "Helvetica-Bold"
-                ),
-                (
-                    "TEXTCOLOR",
-                    (1, 0),
-                    (1, -1),
-                    text_colour
-                ),
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.4,
-                    border_colour
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                )
-            ]
-        )
-    )
-
-    story.append(details_table)
-    story.append(Spacer(1, 9 * mm))
-
-    # =========================================================
-    # FUNCTION SCORECARD
-    # =========================================================
-
-    story.append(
-        Paragraph(
-            """
-            <font color="#07051B" size="14">
-                <b>NIST CSF 2.0 Function Scorecard</b>
-            </font>
-            """,
-            styles["BodyText"]
-        )
-    )
-
-    story.append(Spacer(1, 4 * mm))
-
-    score_rows = [
-        [
-            "NIST CSF Function",
-            "Score",
-            "Interpretation"
-        ]
-    ]
-
-    for function_name, score in function_scores.items():
-
-        if score is None:
-
-            interpretation = "Not assessable"
-            displayed_score = "N/A"
-
-        else:
-
-            displayed_score = f"{score:.1f}%"
-
-            if score >= 90:
-                interpretation = "Strong"
-
-            elif score >= 75:
-                interpretation = "Good"
-
-            elif score >= 60:
-                interpretation = "Developing"
-
-            elif score >= 40:
-                interpretation = "Weak"
-
-            else:
-                interpretation = "Critical"
-
-        score_rows.append(
-            [
-                function_name,
-                displayed_score,
-                interpretation
-            ]
-        )
-
-    score_table = Table(
-        score_rows,
-        colWidths=[
-            66 * mm,
-            34 * mm,
-            67 * mm
-        ],
-        repeatRows=1
-    )
-
-    score_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    brand_purple
-                ),
-                (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (-1, 0),
-                    colors.white
-                ),
-                (
-                    "FONTNAME",
-                    (0, 0),
-                    (-1, 0),
-                    "Helvetica-Bold"
-                ),
-                (
-                    "ROWBACKGROUNDS",
-                    (0, 1),
-                    (-1, -1),
-                    [
-                        colors.white,
-                        soft_background
-                    ]
-                ),
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.4,
-                    border_colour
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    7
-                )
-            ]
-        )
-    )
-
-    story.append(score_table)
-    story.append(Spacer(1, 8 * mm))
-
-    # =========================================================
-    # PRIORITY FINDINGS
-    # =========================================================
-
-    story.append(
-        Paragraph(
-            """
-            <font color="#07051B" size="14">
-                <b>Priority Findings and Recommended Actions</b>
-            </font>
-            """,
-            styles["BodyText"]
-        )
-    )
-
-    story.append(Spacer(1, 4 * mm))
-
-    if weak_answers:
-
-        risk_rows = [
-            [
-                "Code",
-                "Priority",
-                "Finding and recommended action"
-            ]
-        ]
-
-        for answer in weak_answers:
-
-            priority = (
-                "Critical"
-                if answer.value == 1
-                else "High"
-            )
-
-            finding_content = Paragraph(
-                f"""
-                <b>{answer.question.text}</b>
-                <br/>
-                Strengthen the
-                {answer.question.function}
-                control area, assign an accountable owner,
-                define a target completion date and retain
-                implementation and testing evidence.
-                """,
-                styles["BodyText"]
-            )
-
-            risk_rows.append(
-                [
-                    answer.question.code,
-                    priority,
-                    finding_content
-                ]
-            )
-
-        risk_table = Table(
-            risk_rows,
-            colWidths=[
-                20 * mm,
-                25 * mm,
-                122 * mm
-            ],
-            repeatRows=1
-        )
-
-        risk_table.setStyle(
-            TableStyle(
-                [
-                    (
-                        "BACKGROUND",
-                        (0, 0),
-                        (-1, 0),
-                        brand_navy
-                    ),
-                    (
-                        "TEXTCOLOR",
-                        (0, 0),
-                        (-1, 0),
-                        colors.white
-                    ),
-                    (
-                        "FONTNAME",
-                        (0, 0),
-                        (-1, 0),
-                        "Helvetica-Bold"
-                    ),
-                    (
-                        "GRID",
-                        (0, 0),
-                        (-1, -1),
-                        0.4,
-                        border_colour
-                    ),
-                    (
-                        "VALIGN",
-                        (0, 0),
-                        (-1, -1),
-                        "TOP"
-                    ),
-                    (
-                        "LEFTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        6
-                    ),
-                    (
-                        "RIGHTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        6
-                    ),
-                    (
-                        "TOPPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        6
-                    ),
-                    (
-                        "BOTTOMPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        6
-                    )
-                ]
-            )
-        )
-
-        story.append(risk_table)
-
-    else:
-
-        no_findings = Table(
-            [
-                [
-                    Paragraph(
-                        """
-                        <para align="center">
-                            <font color="#157347">
-                                <b>
-                                    No score-triggered priority
-                                    findings were generated.
-                                </b>
-                            </font>
-                        </para>
-                        """,
-                        styles["BodyText"]
-                    )
-                ]
-            ],
-            colWidths=[
-                167 * mm
-            ]
-        )
-
-        no_findings.setStyle(
-            TableStyle(
-                [
-                    (
-                        "BACKGROUND",
-                        (0, 0),
-                        (-1, -1),
-                        colors.HexColor("#EAF8EF")
-                    ),
-                    (
-                        "BOX",
-                        (0, 0),
-                        (-1, -1),
-                        1,
-                        colors.HexColor("#157347")
-                    ),
-                    (
-                        "TOPPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        10
-                    ),
-                    (
-                        "BOTTOMPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        10
-                    )
-                ]
-            )
-        )
-
-        story.append(no_findings)
-
-    story.append(Spacer(1, 8 * mm))
-
-    # =========================================================
-    # MANAGEMENT NOTE
-    # =========================================================
-
-    story.append(
-        Paragraph(
-            """
-            <font color="#07051B" size="14">
-                <b>Management Note</b>
-            </font>
-            """,
-            styles["BodyText"]
-        )
-    )
-
-    story.append(Spacer(1, 3 * mm))
-
-    management_note = Table(
-        [
-            [
-                Paragraph(
-                    """
-                    This report should be used to prioritise
-                    improvement, assign control owners and support
-                    future retesting. It does not certify that the
-                    organisation is immune to ransomware or ready
-                    for every attack scenario.
-                    """,
-                    styles["BodyText"]
-                )
-            ]
-        ],
-        colWidths=[
-            167 * mm
-        ]
-    )
-
-    management_note.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    colors.HexColor("#F3F5FB")
-                ),
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.7,
-                    border_colour
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    10
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    10
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    9
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    9
-                )
-            ]
-        )
-    )
-
-    story.append(management_note)
-    story.append(Spacer(1, 7 * mm))
-
-    # =========================================================
-    # REPORT FOOTER
-    # =========================================================
-
-    story.append(
-        Paragraph(
-            """
-            <para align="center">
-                <font color="#70758F" size="7">
-                    <b>CONFIDENTIAL DEMONSTRATION REPORT</b>
-                    <br/>
-                    RansomwareShield-SA Group 7
-                    · Fictional academic assessment information
-                </font>
-            </para>
-            """,
-            styles["BodyText"]
-        )
-    )
-
-    # ---------------------------------------------------------
-    # BUILD AND RETURN PDF
-    # ---------------------------------------------------------
-
-    document.build(story)
-
-    pdf_buffer.seek(0)
-
-    audit(
-        "REPORT_GENERATE",
-        "SUCCESS",
-        f"Assessment {assessment_record.id}"
-    )
-
-    return send_file(
-        pdf_buffer,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=(
-            "RansomwareShield-SA-"
-            f"Official-Report-{assessment_record.id}.pdf"
-        )
-    )
+        abort(400)
+    db.session.commit()
+    audit("USER_MANAGE", "SUCCESS", f"{u.email} {detail}")
+    flash(f"{u.fullname}: {detail}.", "success")
+    return redirect(url_for("management"))
+
+
+@app.post("/management/user/<int:uid>/reset")
+@super_required
+def reset_user_password(uid):
+    u = db.session.get(User, uid) or abort(404)
+    if is_super(u):
+        flash("Use your own sign-in to change the Super Admin password.", "error")
+        return redirect(url_for("management"))
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    code = "RS-" + "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3))
+    u.set_password(code)
+    u.must_reset = True
+    u.reset_expires = utcnow() + timedelta(hours=24)
+    u.failed_attempts, u.locked_until = 0, None
+    db.session.commit()
+    ok, msg = send_graph_mail(u.email, "Your RansomwareShield-SA password was reset",
+                              f"<p>Hello {u.fullname},</p><p>An administrator reset your password.</p>"
+                              f"<p>Sign in at {app.config['PUBLIC_BASE_URL']} using your email and this one-time code: "
+                              f"<b>{code}</b></p><p>You will then create a new password. The code expires in 24 hours.</p>")
+    session["reset_code"] = {"name": u.fullname, "email": u.email, "code": code, "emailed": ok}
+    audit("PASSWORD_RESET", "ISSUED", f"{u.email} by Super Admin")
+    flash(f"Password reset for {u.fullname}. All their sessions were signed out. {msg}", "success" if ok else "warning")
+    return redirect(url_for("management"))
+
+
+@app.post("/management/user/<int:uid>/delete")
+@super_required
+def delete_user(uid):
+    u = db.session.get(User, uid) or abort(404)
+    if is_super(u) or u.id == current_user.id:
+        flash("The Super Admin account cannot be deleted.", "error")
+        return redirect(url_for("management"))
+    if request.form.get("confirm_email", "").strip().lower() != u.email:
+        flash("Deletion cancelled - the confirmation email did not match.", "error")
+        return redirect(url_for("management"))
+    email = u.email
+    ids = [a.id for a in Assessment.query.filter_by(user_id=u.id).all()]
+    if ids:
+        Action.query.filter(Action.assessment_id.in_(ids)).delete(synchronize_session=False)
+        for a in Assessment.query.filter(Assessment.id.in_(ids)).all():
+            db.session.delete(a)
+    ThreatCheck.query.filter_by(user_id=u.id).delete(synchronize_session=False)
+    Audit.query.filter_by(user_id=u.id).update({"user_id": None}, synchronize_session=False)
+    AdminInvite.query.filter_by(created_by=u.id).update({"created_by": current_user.id}, synchronize_session=False)
+    db.session.delete(u)
+    db.session.commit()
+    audit("USER_DELETE", "SUCCESS", f"{email} and {len(ids)} assessment(s) deleted")
+    flash(f"{email} and their data were permanently deleted.", "success")
+    return redirect(url_for("management"))
+
+
+@app.post("/management/invite/<int:iid>/revoke")
+@admin_required
+def revoke_invite(iid):
+    inv = db.session.get(AdminInvite, iid) or abort(404)
+    inv.revoked = True
+    db.session.commit()
+    audit("INVITE_REVOKE", "SUCCESS", inv.email)
+    flash("Invitation revoked.", "success")
+    return redirect(url_for("management"))
+
+
+@app.route("/invite/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def accept_invite(token):
+    try:
+        data = invite_serializer().loads(token, max_age=172800)
+        inv = db.session.get(AdminInvite, int(data["id"]))
+    except (BadSignature, SignatureExpired, ValueError, KeyError, TypeError):
+        return error_page(400, "Invitation invalid", "This invitation is invalid or has expired.")
+    if (not inv or inv.revoked or inv.accepted_at or aware(inv.expires_at) < utcnow()
+            or not secrets.compare_digest(inv.token_hash, hashlib.sha256(data["raw"].encode()).hexdigest())):
+        return error_page(400, "Invitation unavailable", "This invitation has expired, was revoked or was already used.")
+    form = NewPasswordForm()
+    if form.validate_on_submit():
+        if User.query.filter_by(email=inv.email).first():
+            return error_page(400, "Account exists", "An account already exists for this email.")
+        u = User(fullname=inv.fullname, email=inv.email, organisation=inv.organisation, role=inv.role)
+        u.set_password(form.password.data)
+        db.session.add(u)
+        inv.accepted_at = utcnow()
+        db.session.commit()
+        audit("INVITE_ACCEPT", "SUCCESS", inv.email, u)
+        flash("Account activated. Sign in with your new password.", "success")
+        return redirect(url_for("login"))
+    return render_template("accept_invite.html", form=form, invite=inv)
 
 
 with app.app_context():
     db.create_all()
+    migrate()
     seed()
-
 
 if __name__ == "__main__":
     app.run(debug=True)
-with app.app_context():db.create_all();seed()
-if __name__=='__main__':app.run(debug=True)

@@ -1,16 +1,20 @@
 services:
   - type: web
-    name: ransomwareshield-sa
+    name: ransomwareshield-sa-v2
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
-    healthCheckPath: /login
+    startCommand: gunicorn wsgi:app --workers 1 --threads 4 --timeout 60
+    healthCheckPath: /healthz
     envVars:
-      - key: SECRET_KEY
-        generateValue: true
       - key: FLASK_ENV
         value: production
       - key: SESSION_MINUTES
         value: 30
+      - key: SECRET_KEY
+        generateValue: true
       - key: DATABASE_URL
+        sync: false
+      - key: SUPERADMIN_EMAIL
+        sync: false
+      - key: PUBLIC_BASE_URL
         sync: false

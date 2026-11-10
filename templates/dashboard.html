@@ -1,1 +1,71 @@
-{% extends 'layout.html' %}{% block content %}<section class="hero"><div><p class="eyebrow">Authenticated workspace</p><h1>Welcome, {{current_user.fullname}}</h1><p>{{current_user.role}} at <strong>{{current_user.organisation}}</strong></p></div><form method="post" action="{{url_for('new_assessment')}}"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="btn light">Start new assessment</button></form></section><div class="metrics"><article><span>Latest score</span><strong>{{latest.overall_score ~ '%' if latest else 'No result'}}</strong><small>{{latest.readiness if latest else 'Complete an assessment'}}</small></article><article><span>Assessments</span><strong>{{assessments|length}}</strong><small>Draft and completed</small></article><article><span>Organisation</span><strong>{{current_user.organisation}}</strong><small>Current account context</small></article></div><section class="card"><h2>Assessment history</h2><div class="table"><table><tr><th>ID</th><th>Date</th><th>Status</th><th>Score</th><th></th></tr>{% for a in assessments %}<tr><td>#{{a.id}}</td><td>{{a.created_at.strftime('%d %b %Y')}}</td><td>{{a.status}}</td><td>{{a.overall_score or '-'}}</td><td><a href="{{url_for('results',aid=a.id) if a.status=='Completed' else url_for('assessment',aid=a.id,fn='Govern')}}">Open</a></td></tr>{% else %}<tr><td colspan="5">No assessments yet.</td></tr>{% endfor %}</table></div></section>{% endblock %}
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Dashboard | RansomwareShield-SA{% endblock %}
+{% block crumb %}Security posture overview{% endblock %}
+{% block content %}
+<section class="hero dash-hero">
+  <div class="hero-brand"><img src="{{ url_for('static', filename='logo.jpg') }}" alt=""><div>
+    <p class="eyebrow">{{ greeting }}, {{ first_name }}</p>
+    <h1>Your ransomware readiness at a glance</h1>
+    <p>{{ display_role(current_user) }} &middot; <b>{{ current_user.organisation }}</b></p>
+  </div></div>
+  <div class="hero-actions">
+    <form method="post" action="{{ url_for('new_assessment') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn light" data-tour="start-assessment" type="submit">{{ icon('plus') }}New assessment</button></form>
+    <button type="button" class="btn glass" data-start-tour>{{ icon('compass') }}Take the tour</button>
+  </div>
+</section>
+
+<div class="metrics">
+  <article class="metric">
+    <span class="m-label">{{ icon('target','ic sm') }}Readiness score</span>
+    {% if latest %}<strong class="lvl-text-{{ latest.readiness|lower }}">{{ latest.overall_score }}%</strong><small>{{ latest.readiness }} &middot; RSA-{{ '%04d' % latest.id }}</small>
+    {% else %}<strong>&mdash;</strong><small>No completed assessment yet</small>{% endif %}
+  </article>
+  <article class="metric">
+    <span class="m-label">{{ icon('file','ic sm') }}Assessments</span>
+    <strong>{{ assessments|selectattr('status','equalto','Completed')|list|length }}</strong><small>completed &middot; {{ assessments|length }} total</small>
+  </article>
+  <article class="metric {{ 'm-warn' if critical or overdue }}">
+    <span class="m-label">{{ icon('tasks','ic sm') }}Open remediation</span>
+    <strong>{{ open_actions }}</strong><small>{{ critical }} critical &middot; {{ overdue }} overdue</small>
+  </article>
+  <article class="metric">
+    <span class="m-label">{{ icon('radar','ic sm') }}External exposure</span>
+    {% if last_check %}<strong class="risk-text-{{ last_check.risk|lower }}">{{ last_check.risk }}</strong><small>{{ last_check.target }}</small>
+    {% else %}<strong>&mdash;</strong><small><a href="{{ url_for('threat_exposure') }}">Run your first scan</a></small>{% endif %}
+  </article>
+</div>
+
+<div class="two-col">
+  <section class="card">
+    <div class="section-head"><div><p class="eyebrow dark">Readiness by Function</p><h2>NIST CSF 2.0 snapshot</h2></div>{% if latest %}<a class="btn ghost sm" href="{{ url_for('results', aid=latest.id) }}">Full results</a>{% endif %}</div>
+    {% if scores %}
+      {% for fn, s in scores.items() %}<div class="bar"><span>{{ fn }}</span><i><b data-width="{{ s or 0 }}" class="lvl-{{ 'crit' if s is not none and s < 40 else 'weak' if s is not none and s < 60 else 'dev' if s is not none and s < 75 else 'good' }}"></b></i><strong>{{ (s ~ '%') if s is not none else 'N/A' }}</strong></div>{% endfor %}
+    {% else %}<div class="empty-state">{{ icon('target','ic xl') }}<p>Complete your first assessment to see readiness across Govern, Identify, Protect, Detect, Respond and Recover.</p></div>{% endif %}
+  </section>
+  <section class="card">
+    <div class="section-head"><div><p class="eyebrow dark">Trend</p><h2>Readiness over time</h2></div></div>
+    {% if trend %}<canvas id="trend-chart" data-points='{{ trend|tojson }}'></canvas>
+    {% else %}<div class="empty-state">{{ icon('activity','ic xl') }}<p>Your improvement trend appears after your first completed assessment.</p></div>{% endif %}
+  </section>
+</div>
+
+<section class="quick-grid">
+  <a class="quick" href="{{ url_for('actions') }}">{{ icon('tasks') }}<b>Work the remediation plan</b><span>Assign owners and dates to weak controls.</span></a>
+  <a class="quick" href="{{ url_for('threat_exposure') }}">{{ icon('radar') }}<b>Scan external exposure</b><span>Check SPF, DMARC, DNSSEC, HTTPS and breaches.</span></a>
+  <button type="button" class="quick" data-ai-ask="What should I fix first?">{{ icon('compass') }}<b>Ask ShieldAI for a plan</b><span>Get a prioritised 30/60/90-day roadmap.</span></button>
+  <a class="quick" href="{{ url_for('security') }}">{{ icon('shield') }}<b>Review your security events</b><span>See sign-ins and actions on your account.</span></a>
+</section>
+
+<section class="card">
+  <div class="section-head"><h2>Assessment history</h2></div>
+  <div class="table"><table>
+    <tr><th>Reference</th><th>Started</th><th>Status</th><th>Score</th><th>Readiness</th><th></th></tr>
+    {% for a in assessments %}
+    <tr><td><span class="code">RSA-{{ '%04d' % a.id }}</span></td><td>{{ a.created_at.strftime('%d %b %Y') if a.created_at }}</td>
+      <td><span class="status s-{{ a.status|lower }}">{{ a.status }}</span></td><td>{{ a.overall_score if a.overall_score is not none else '&mdash;'|safe }}</td><td>{{ a.readiness or '&mdash;'|safe }}</td>
+      <td class="right"><a href="{{ url_for('results', aid=a.id) if a.status=='Completed' else url_for('assessment', aid=a.id, fn='Govern') }}">{{ 'View results' if a.status=='Completed' else 'Continue' }} &rarr;</a></td></tr>
+    {% else %}<tr><td colspan="6" class="empty">No assessments yet. Select <b>New assessment</b> to begin.</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

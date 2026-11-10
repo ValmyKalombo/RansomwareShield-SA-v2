@@ -1,0 +1,17 @@
+{% extends '_auth.html' %}
+{% from '_field.html' import field %}
+{% block title %}Accept invitation | RansomwareShield-SA{% endblock %}
+{% block eyebrow %}Secure invitation{% endblock %}
+{% block headline %}You've been invited.{% endblock %}
+{% block lead %}Create a password to activate your RansomwareShield-SA account. This link works once and expires 48 hours after it was issued.{% endblock %}
+{% block card %}
+<div class="card-top"><span class="badge-secure">{{ icon('mail','ic sm') }}Invitation verified</span></div>
+<h2>Activate account</h2>
+<div class="invite-id"><b>{{ invite.fullname }}</b><small>{{ invite.email }}</small><span class="role-tag">{{ invite.role }}</span><small>{{ invite.organisation }}</small></div>
+<form method="post" novalidate>{{ form.hidden_tag() }}
+  {{ field(form.password,'At least 12 characters',{'autocomplete':'new-password','data-strength':'1'}) }}
+  <div class="strength"><i></i><span>Password strength</span></div>
+  {{ field(form.confirm,'Repeat password',{'autocomplete':'new-password'}) }}
+  {{ form.submit(class='btn primary wide', value='Activate my account') }}
+</form>
+{% endblock %}

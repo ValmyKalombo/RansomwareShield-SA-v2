@@ -1,8 +1,47 @@
-{% extends 'layout.html' %}{% block content %}
-<section class="hero result-hero"><div><p class="eyebrow">Completed assessment</p><h1>{{a.organisation}}</h1><p>Project-defined readiness result; not NIST certification or proof that ransomware cannot succeed.</p></div><div class="result-score"><strong>{{a.overall_score}}%</strong><span>{{a.readiness}}</span></div></section>
-<section class="results-grid"><article class="card chart-card"><div class="section-head"><div><p class="eyebrow dark">Readiness profile</p><h2>NIST CSF Function radar chart</h2></div><span class="demo-badge">DEMO RESULT</span></div><p class="muted">Comparison of the six core Function scores on a 0-100 scale.</p><canvas id="readiness-radar" width="620" height="450" data-labels='{{scores.keys()|list|tojson}}' data-scores='{{scores.values()|list|tojson}}' aria-label="Radar chart of NIST CSF Function scores"></canvas></article>
-<article class="card readiness-card"><p class="eyebrow dark">Assessment badge</p><div class="readiness-seal readiness-{{a.readiness|lower|replace(' ','-')}}"><span class="seal-small">RANSOMWARE READINESS</span><strong>{{a.readiness}}</strong><span>{{a.overall_score}}%</span></div><h2>{{'Strong preparedness demonstrated' if a.readiness=='Strong' else 'Good preparedness demonstrated' if a.readiness=='Good' else 'Improvement remains necessary'}}</h2><p class="muted">This demonstration badge summarises the project-defined result. It is not certification and does not guarantee protection from ransomware.</p><a class="btn primary wide" href="{{url_for('report',aid=a.id)}}">Download branded PDF report</a></article></section>
-<section class="card"><p class="eyebrow dark">Detailed results</p><h2>Function scores</h2>{% for fn,s in scores.items() %}<div class="bar"><span>{{fn}}</span><i><b style="width:{{s or 0}}%"></b></i><strong>{{s if s is not none else 'N/A'}}{% if s is not none %}%{% endif %}</strong></div>{% endfor %}</section>
-<section class="card"><div class="section-head"><div><p class="eyebrow dark">Prioritised action</p><h2>Risk register and recommendations</h2></div><span class="risk-count">{{risks|length}} identified</span></div><div class="table"><table><tr><th>Code</th><th>Weakness</th><th>Priority</th><th>Recommendation</th></tr>{% for x in risks %}<tr><td>{{x.question.code}}</td><td>{{x.question.text}}</td><td><span class="risk">{{'Critical' if x.value==1 else 'High'}}</span></td><td>Strengthen the {{x.question.function}} control area and retain implementation and testing evidence.</td></tr>{% else %}<tr><td colspan="4">No score-triggered weaknesses were generated.</td></tr>{% endfor %}</table></div></section>
-<script src="{{url_for('static',filename='results.js')}}" defer></script>
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Results | RansomwareShield-SA{% endblock %}
+{% block crumb %}Results &middot; RSA-{{ '%04d' % a.id }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">Completed assessment &middot; RSA-{{ '%04d' % a.id }}</p><h1>{{ a.organisation }}</h1>
+  <p>Completed {{ a.submitted_at.strftime('%d %B %Y') if a.submitted_at }} by {{ a.user.fullname }} &middot; NIST CSF 2.0 aligned</p></div>
+  <div class="hero-actions"><a class="btn light" href="{{ url_for('report', aid=a.id) }}">{{ icon('download') }}Branded PDF report</a><button type="button" class="btn glass" data-ai-ask="Summarise my latest assessment and tell me what to fix first">{{ icon('compass') }}Ask ShieldAI</button></div>
+</section>
+
+<div class="results-grid">
+  <section class="card badge-card">
+    <p class="eyebrow dark">Readiness badge</p>
+    <div class="gauge" data-gauge="{{ a.overall_score or 0 }}" data-level="{{ (a.readiness or 'na')|lower }}">
+      <svg viewBox="0 0 200 200"><circle class="g-track" cx="100" cy="100" r="84"/><circle class="g-arc" cx="100" cy="100" r="84"/></svg>
+      <div class="g-center"><img src="{{ url_for('static', filename='logo.jpg') }}" alt=""><b data-count="{{ a.overall_score or 0 }}">{{ a.overall_score }}%</b><span>{{ a.readiness }}</span></div>
+    </div>
+    <div class="badge-label lvl-bg-{{ (a.readiness or 'na')|lower }}">{{ {'Strong':'Strong preparedness','Good':'Good preparedness','Developing':'Developing readiness','Weak':'Improvement required'}.get(a.readiness, 'Priority improvement required') }}</div>
+    <p class="fine">Project-defined result. Not certification and not a guarantee against ransomware.</p>
+    <div class="legend"><span class="l-crit">&lt;40 Critical</span><span class="l-weak">40-59 Weak</span><span class="l-dev">60-74 Developing</span><span class="l-good">75-89 Good</span><span class="l-strong">90+ Strong</span></div>
+  </section>
+  <section class="card">
+    <div class="section-head"><div><p class="eyebrow dark">Readiness profile</p><h2>NIST CSF 2.0 radar</h2></div><span class="tag">0 - 100</span></div>
+    <canvas id="radar" data-labels='{{ scores.keys()|list|tojson }}' data-scores='{{ scores.values()|list|tojson }}'></canvas>
+  </section>
+</div>
+
+<section class="card">
+  <div class="section-head"><h2>Function scores</h2><span class="tag">Weighted: Govern and Protect 20%, others 15%</span></div>
+  {% for fn, s in scores.items() %}
+  <div class="bar"><span>{{ fn }}</span><i><b data-width="{{ s or 0 }}" class="lvl-{{ 'crit' if s is not none and s < 40 else 'weak' if s is not none and s < 60 else 'dev' if s is not none and s < 75 else 'good' }}"></b></i><strong>{{ (s ~ '%') if s is not none else 'N/A' }}</strong></div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="section-head"><h2>Risk register and recommendations</h2><span class="tag warn">{{ risks|length }} weak controls</span></div>
+  <div class="table"><table>
+    <tr><th>Code</th><th>Weak control</th><th>Priority</th><th>Recommended action</th></tr>
+    {% for x in risks %}
+    <tr><td><span class="code">{{ x.question.code }}</span></td><td>{{ x.question.text }}<small class="muted block">{{ x.question.function }}</small></td>
+    <td><span class="risk {{ 'critical' if x.value==1 else 'high' }}">{{ 'Critical' if x.value==1 else 'High' }}</span></td><td>{{ recs[x.question.function] }}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">No score-triggered weaknesses were generated.</td></tr>{% endfor %}
+  </table></div>
+  <a class="btn ghost" href="{{ url_for('actions') }}">{{ icon('tasks') }}Open remediation tracker</a>
+</section>
 {% endblock %}

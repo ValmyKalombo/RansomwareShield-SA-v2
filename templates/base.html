@@ -1,1 +1,17 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}RansomwareShield-SA{% endblock %}</title><link rel="stylesheet" href="{{url_for('static',filename='app.css')}}"></head><body>{% block body %}{% endblock %}</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}RansomwareShield-SA{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='logo.jpg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ app_version }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% block body %}{% endblock %}
+  <footer class="site-footer"><span class="dot-ok"></span>RansomwareShield-SA <b>v{{ app_version }}</b> &middot; TLS secured &middot; Audited &middot; Academic prototype &middot; Fictional data only &middot; &copy; {{ current_year }} Group 7</footer>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ app_version }}" defer></script>
+</body>
+</html>

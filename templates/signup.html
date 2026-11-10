@@ -1,1 +1,21 @@
-{% extends 'base.html' %}{% block title %}Create account | RansomwareShield-SA{% endblock %}{% block body %}<main class="auth-shell"><section class="auth-brand"><img src="{{url_for('static',filename='logo.jpg')}}" alt="RansomwareShield-SA logo"><p class="eyebrow">Secure onboarding</p><h1>Create your assessment account.</h1><p>Use fictional academic information only. Public registration is provided for the prototype demonstration.</p></section><section class="auth-card"><a class="about-link" href="{{url_for('login')}}">Back to sign in</a><h2>Create account</h2><p class="muted">Your password must contain at least 12 characters.</p>{% include 'messages.html' %}<form method="post">{{form.hidden_tag()}}<div class="grid2"><label>{{form.fullname.label}}{{form.fullname(class='input')}}</label><label>{{form.email.label}}{{form.email(class='input')}}</label><label>{{form.organisation.label}}{{form.organisation(class='input')}}</label><label>{{form.role.label}}{{form.role(class='input')}}</label></div><label>{{form.password.label}}{{form.password(class='input')}}</label><label>{{form.confirm.label}}{{form.confirm(class='input')}}</label><label class="remember">{{form.terms()}} {{form.terms.label.text}}</label>{% for f in [form.fullname,form.email,form.organisation,form.role,form.password,form.confirm,form.terms] %}{% for e in f.errors %}<div class="field-error">{{e}}</div>{% endfor %}{% endfor %}{{form.submit(class='btn primary wide')}}</form></section></main>{% endblock %}
+{% extends '_auth.html' %}
+{% from '_field.html' import field %}
+{% block title %}Create account | RansomwareShield-SA{% endblock %}
+{% block eyebrow %}Secure onboarding{% endblock %}
+{% block headline %}Create your readiness account.{% endblock %}
+{% block lead %}Use fictional academic information only. Your password is hashed with scrypt and is never stored or shown in readable form.{% endblock %}
+{% block card_class %} wide-card{% endblock %}
+{% block card %}
+<div class="card-top"><span class="badge-secure">{{ icon('lock','ic sm') }}Encrypted registration</span><a href="{{ url_for('login') }}">Back to sign in</a></div>
+<h2>Create account</h2>
+{% include 'messages.html' %}
+<form method="post" novalidate>
+  {{ form.hidden_tag() }}
+  <div class="grid2">{{ field(form.fullname,'Jane Dlamini',{'autocomplete':'name'}) }}{{ field(form.email,'jane@demo-bank.co.za',{'autocomplete':'email'}) }}{{ field(form.organisation,'Demo Bank') }}{{ field(form.role) }}</div>
+  {{ field(form.password,'At least 12 characters',{'autocomplete':'new-password','data-strength':'1'}) }}
+  <div class="strength"><i></i><span>Password strength</span></div>
+  {{ field(form.confirm,'Repeat password',{'autocomplete':'new-password'}) }}
+  <label class="check{{ ' has-error' if form.terms.errors }}">{{ form.terms() }}<span>{{ form.terms.label.text }}</span></label>
+  {{ form.submit(class='btn primary wide') }}
+</form>
+{% endblock %}

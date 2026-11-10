@@ -2,7 +2,7 @@
   {
     "code": "GV1",
     "function": "Govern",
-    "text": "The bank has a board-approved cybersecurity strategy that includes ransomware preparedness."
+    "text": "The organisation has a board-approved cybersecurity strategy that includes ransomware preparedness."
   },
   {
     "code": "GV2",
@@ -17,7 +17,7 @@
   {
     "code": "GV4",
     "function": "Govern",
-    "text": "The bank provides adequate budget and resources for ransomware preparedness."
+    "text": "The organisation provides adequate budget and resources for ransomware preparedness."
   },
   {
     "code": "GV5",
@@ -27,7 +27,7 @@
   {
     "code": "GV6",
     "function": "Govern",
-    "text": "The bank monitors relevant cybersecurity and privacy obligations."
+    "text": "The organisation monitors relevant cybersecurity and privacy obligations."
   },
   {
     "code": "GV7",
@@ -37,12 +37,12 @@
   {
     "code": "ID1",
     "function": "Identify",
-    "text": "The bank maintains an inventory of hardware, software, data and cloud assets."
+    "text": "The organisation maintains an inventory of hardware, software, data and cloud assets."
   },
   {
     "code": "ID2",
     "function": "Identify",
-    "text": "Critical banking applications and sensitive information are identified and categorised."
+    "text": "Critical applications and sensitive information are identified and categorised."
   },
   {
     "code": "ID3",
@@ -57,7 +57,7 @@
   {
     "code": "ID5",
     "function": "Identify",
-    "text": "The bank considers cyber threats enabled by artificial intelligence."
+    "text": "The organisation considers cyber threats enabled by artificial intelligence."
   },
   {
     "code": "ID6",
@@ -182,7 +182,7 @@
   {
     "code": "RS6",
     "function": "Respond",
-    "text": "The bank can coordinate with regulators, law enforcement and affected third parties."
+    "text": "The organisation can coordinate with regulators, law enforcement and affected third parties."
   },
   {
     "code": "RS7",
@@ -202,7 +202,7 @@
   {
     "code": "RC2",
     "function": "Recover",
-    "text": "Banking operations can be restored within approved recovery-time objectives."
+    "text": "Operations can be restored within approved recovery-time objectives."
   },
   {
     "code": "RC3",
@@ -232,7 +232,7 @@
   {
     "code": "AI1",
     "function": "AI Preparedness",
-    "text": "The bank assesses risks from AI-powered phishing or social engineering."
+    "text": "The organisation assesses risks from AI-powered phishing or social engineering."
   },
   {
     "code": "AI2",
@@ -247,6 +247,6 @@
   {
     "code": "AI4",
     "function": "AI Preparedness",
-    "text": "The bank monitors AI-enabled vulnerability discovery and exploitation trends."
+    "text": "The organisation monitors AI-enabled vulnerability discovery and exploitation trends."
   }
 ]

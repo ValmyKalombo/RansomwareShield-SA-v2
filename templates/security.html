@@ -1,0 +1,13 @@
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Security Centre | RansomwareShield-SA{% endblock %}
+{% block crumb %}Security Centre{% endblock %}
+{% block content %}
+<section class="hero"><div><p class="eyebrow">Security Centre</p><h1>Controls protecting your account</h1><p>Platform safeguards and your personal security event trail.</p></div></section>
+<div class="two-col">
+  <section class="card"><h2>Active controls</h2><ul class="control-list">{% for name, on in controls %}<li class="{{ 'on' if on else 'off' }}"><span class="ci">{{ icon('check' if on else 'info','ic sm') }}</span>{{ name }}<em>{{ 'Active' if on else 'Production only' }}</em></li>{% endfor %}</ul></section>
+  <section class="card"><h2>Your recent activity</h2><div class="table"><table><tr><th>Time (UTC)</th><th>Event</th><th>Outcome</th></tr>
+    {% for e in events %}<tr><td>{{ e.created_at.strftime('%d %b %H:%M') if e.created_at }}</td><td>{{ e.event }}</td><td><span class="status s-{{ e.outcome|lower }}">{{ e.outcome }}</span></td></tr>{% else %}<tr><td colspan="3" class="empty">No events yet.</td></tr>{% endfor %}
+  </table></div><p class="fine">Activity you don't recognise? Sign out and ask the Super Admin to reset your password.</p></section>
+</div>
+{% endblock %}

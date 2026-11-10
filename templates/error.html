@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}{{ code }} {{ title }} | RansomwareShield-SA{% endblock %}
+{% block body %}
+<main class="error-page"><section class="error-card">
+  <img src="{{ url_for('static', filename='logo.jpg') }}" alt="RansomwareShield-SA">
+  <span class="code-big">{{ code }}</span><h1>{{ title }}</h1><p class="muted">{{ message }}</p>
+  <a class="btn primary" href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('login') }}">Return to safety</a>
+  <small class="muted block">Reference {{ request_id }}</small>
+</section></main>
+{% endblock %}

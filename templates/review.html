@@ -1,1 +1,18 @@
-{% extends 'layout.html' %}{% block content %}<section class="hero"><div><p class="eyebrow">Submission review</p><h1>Review assessment</h1><p>Core responses completed: {{answered}} / {{total}}</p></div></section><section class="card"><h2>Before submission</h2><p>Confirm every core question is answered and N/A responses have evidence notes.</p><form method="post" action="{{url_for('submit',aid=a.id)}}"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="btn primary">Submit and calculate</button></form></section>{% endblock %}
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Review | RansomwareShield-SA{% endblock %}
+{% block crumb %}Review submission{% endblock %}
+{% block content %}
+<section class="hero"><div><p class="eyebrow">Submission review</p><h1>{{ answered }} of {{ total }} core questions complete</h1><p>Submitting locks the assessment and generates the score, risk register and remediation plan.</p></div></section>
+<section class="card">
+  <ul class="ticks">
+    <li class="{{ 'ok' if answered >= total else 'no' }}">{{ 'All core questions answered.' if answered >= total else (total - answered)|string + ' core question(s) still need an answer.' }}</li>
+    {% if missing_na %}<li class="no">Add evidence notes for N/A answers: {{ missing_na|join(', ') }}</li>{% endif %}
+  </ul>
+  <form method="post" action="{{ url_for('submit', aid=a.id) }}" class="row-gap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <a class="btn ghost" href="{{ url_for('assessment', aid=a.id, fn='Govern') }}">Back to questions</a>
+    <button class="btn primary" type="submit" {{ 'disabled' if answered < total }}>Submit and calculate</button>
+  </form>
+</section>
+{% endblock %}

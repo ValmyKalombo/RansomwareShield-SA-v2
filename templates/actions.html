@@ -1,0 +1,21 @@
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Remediation | RansomwareShield-SA{% endblock %}
+{% block crumb %}Remediation tracker{% endblock %}
+{% block content %}
+<section class="hero"><div><p class="eyebrow">Remediation tracker</p><h1>Turn findings into action</h1><p>Assign an owner, set a target date and track every weak control to closure.</p></div></section>
+<section class="card"><div class="table"><table>
+  <tr><th>Ref</th><th>Finding</th><th>Priority</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr>
+  {% for i in items %}
+  <tr class="{{ 'overdue' if i.due_date and i.due_date < today and i.status in ['Open','In Progress'] }}">
+    <td><span class="code">{{ i.question_code }}</span><small class="muted block">RSA-{{ '%04d' % i.assessment_id }}</small></td>
+    <td>{{ i.title }}<small class="muted block">{{ i.recommendation }}</small></td>
+    <td><span class="risk {{ i.priority|lower }}">{{ i.priority }}</span></td>
+    <td><input class="input slim" form="f{{ i.id }}" name="owner" maxlength="100" value="{{ i.owner or '' }}" placeholder="Owner"></td>
+    <td><input class="input slim" form="f{{ i.id }}" type="date" name="due_date" value="{{ i.due_date.isoformat() if i.due_date else '' }}"></td>
+    <td><select class="input slim" form="f{{ i.id }}" name="status">{% for s in ['Open','In Progress','Remediated','Accepted Risk'] %}<option {{ 'selected' if s==i.status }}>{{ s }}</option>{% endfor %}</select></td>
+    <td><form id="f{{ i.id }}" method="post" action="{{ url_for('action_update', iid=i.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn primary sm" type="submit">Save</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="empty">No remediation actions yet. Submit an assessment to generate them.</td></tr>{% endfor %}
+</table></div></section>
+{% endblock %}

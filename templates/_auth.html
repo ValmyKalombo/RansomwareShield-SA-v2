@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block body_class %}auth-body{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-brand">
+    <div class="grid-bg"></div><div class="scan-line"></div>
+    <div class="brand-top"><img class="brand-logo" src="{{ url_for('static', filename='logo.jpg') }}" alt="RansomwareShield-SA logo"><div><b>RansomwareShield-SA</b><small>Cybersecurity Readiness Platform</small></div></div>
+    <p class="eyebrow">{% block eyebrow %}Ransomware readiness intelligence{% endblock %}</p>
+    <h1>{% block headline %}Measure readiness.<br>Prioritise resilience.{% endblock %}</h1>
+    <p class="lead-light">{% block lead %}Assess ransomware preparedness across the six NIST CSF 2.0 Functions, track remediation, scan external exposure and brief leadership with confidence.{% endblock %}</p>
+    <ul class="trust-grid">
+      <li>{{ icon('lock') }}<span><b>Encrypted</b>TLS sessions with HSTS</span></li>
+      <li>{{ icon('key') }}<span><b>Hardened identity</b>scrypt hashing, lockout</span></li>
+      <li>{{ icon('shield') }}<span><b>Protected forms</b>CSRF and rate limiting</span></li>
+      <li>{{ icon('activity') }}<span><b>Audited</b>Every security event logged</span></li>
+    </ul>
+  </section>
+  <section class="auth-card{% block card_class %}{% endblock %}">
+    {% block card %}{% endblock %}
+  </section>
+</main>
+{% endblock %}

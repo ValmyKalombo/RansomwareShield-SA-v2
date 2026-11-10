@@ -1,0 +1,111 @@
+{% extends 'layout.html' %}
+{% from '_icons.html' import icon %}
+{% from '_field.html' import field %}
+{% block title %}Management Centre | RansomwareShield-SA{% endblock %}
+{% block crumb %}Management Centre{% endblock %}
+{% block content %}
+<section class="hero manage-hero">
+  <div class="hero-brand"><img src="{{ url_for('static', filename='logo.jpg') }}" alt=""><div><p class="eyebrow">Control plane</p><h1>Management Centre</h1><p>Identity, access and platform oversight for RansomwareShield-SA.</p></div></div>
+  <span class="role-badge{{ ' super' if is_superadmin }}">{{ icon('shield','ic sm') }}{{ 'SUPER ADMIN' if is_superadmin else 'ADMINISTRATOR' }}</span>
+</section>
+
+{% if reset_code %}
+<section class="card code-card">
+  <div><p class="eyebrow dark">One-time reset code &middot; shown once</p><h2>{{ reset_code.name }}</h2><p class="muted">{{ reset_code.email }} &middot; {{ 'Emailed to the user.' if reset_code.emailed else 'Share this code privately (not in a group chat).' }} It expires in 24 hours.</p></div>
+  <div class="code-box"><input class="input mono" value="{{ reset_code.code }}" readonly data-copy><button type="button" class="btn primary" data-copy-btn>Copy</button></div>
+</section>
+{% endif %}
+
+<div class="metrics six">
+  <article class="metric"><span class="m-label">{{ icon('users','ic sm') }}Users</span><strong>{{ stats.users }}</strong><small>{{ stats.active }} active</small></article>
+  <article class="metric"><span class="m-label">{{ icon('shield','ic sm') }}Administrators</span><strong>{{ stats.admins }}</strong><small>incl. Super Admin</small></article>
+  <article class="metric"><span class="m-label">{{ icon('mail','ic sm') }}Pending invites</span><strong>{{ stats.pending }}</strong><small>48-hour links</small></article>
+  <article class="metric"><span class="m-label">{{ icon('file','ic sm') }}Assessments</span><strong>{{ stats.assessments }}</strong><small>completed platform-wide</small></article>
+  <article class="metric"><span class="m-label">{{ icon('activity','ic sm') }}Events (24h)</span><strong>{{ stats.events24 }}</strong><small>audited actions</small></article>
+  <article class="metric {{ 'm-warn' if stats.blocked24 }}"><span class="m-label">{{ icon('alert','ic sm') }}Blocked (24h)</span><strong>{{ stats.blocked24 }}</strong><small>failed or denied</small></article>
+</div>
+
+<div class="two-col">
+  <section class="card">
+    <h2>{{ icon('mail','ic') }} Invite a user</h2>
+    <p class="muted">Creates a one-use, 48-hour invitation. The invitee sets their own password - nobody else ever sees it.{% if not is_superadmin %} Only the Super Admin can invite Administrators.{% endif %}</p>
+    <form method="post" novalidate>{{ form.hidden_tag() }}
+      <div class="grid2">{{ field(form.fullname,'Anele Nhlebela') }}{{ field(form.email,'anele@example.co.za') }}{{ field(form.organisation,'Group 7') }}{{ field(form.role) }}</div>
+      {{ form.submit(class='btn primary') }}
+    </form>
+    {% if new_link %}<div class="invite-link"><b>{{ icon('lock','ic sm') }}Secure invitation link</b><div class="code-box"><input class="input mono" value="{{ new_link }}" readonly data-copy><button class="btn primary" type="button" data-copy-btn>Copy</button></div><small>Send this privately. It works once and expires in 48 hours.</small></div>{% endif %}
+  </section>
+  <section class="card">
+    <h2>{{ icon('key','ic') }} Access model</h2>
+    <div class="tiers">
+      <div class="tier t-super"><b>Super Admin</b><span>Protected owner. Full control, password resets and account deletion.</span></div>
+      <div class="tier t-admin"><b>Administrator</b><span>Invites users, manages standard roles and suspends accounts.</span></div>
+      <div class="tier"><b>Organisation Manager</b><span>Runs assessments, reviews results and manages remediation.</span></div>
+      <div class="tier"><b>Assessor</b><span>Completes assessments and works their own actions.</span></div>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="section-head"><h2>{{ icon('users','ic') }} User directory</h2><input class="input slim search" placeholder="Filter users" data-filter="#user-table"></div>
+  <div class="table"><table id="user-table">
+    <tr><th>User</th><th>Organisation</th><th>Role</th><th>Status</th><th>Joined</th><th>Manage</th></tr>
+    {% for u in users %}{% set is_su = (u.email|lower == super_email) %}
+    <tr data-row>
+      <td><div class="user-cell"><span class="avatar sm">{{ u.fullname[0]|upper }}</span><div><b>{{ u.fullname }}</b><small class="muted block">{{ u.email }}</small></div></div></td>
+      <td>{{ u.organisation }}</td>
+      <td><span class="role-tag{{ ' super' if is_su }}">{{ 'Super Admin' if is_su else u.role }}</span>{% if u.must_reset %}<small class="muted block">Reset pending</small>{% endif %}</td>
+      <td><span class="status s-{{ 'success' if u.active else 'blocked' }}">{{ 'Active' if u.active else 'Suspended' }}</span></td>
+      <td>{{ u.created_at.strftime('%d %b %Y') if u.created_at }}</td>
+      <td>
+        {% if is_su %}<span class="protected">{{ icon('lock','ic sm') }}Protected</span>
+        {% elif u.id == current_user.id %}<span class="muted">You</span>
+        {% else %}
+        <div class="manage">
+          <form method="post" action="{{ url_for('manage_user', uid=u.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select class="input slim" name="role">{% for r in ['Assessor','Organisation Manager','Administrator'] %}<option {{ 'selected' if u.role==r or (r=='Administrator' and u.role=='Admin') }}>{{ r }}</option>{% endfor %}</select>
+            <button class="btn ghost sm" name="action" value="role">Save role</button>
+            <button class="btn ghost sm" name="action" value="toggle">{{ 'Suspend' if u.active else 'Activate' }}</button>
+          </form>
+          {% if is_superadmin %}
+          <form method="post" action="{{ url_for('reset_user_password', uid=u.id) }}" class="inline" data-confirm="Reset the password for {{ u.fullname }}? Their current password and all sessions will stop working immediately.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn warn sm">{{ icon('key','ic sm') }}Reset password</button>
+          </form>
+          <details class="danger-zone"><summary>{{ icon('trash','ic sm') }}Delete</summary>
+            <form method="post" action="{{ url_for('delete_user', uid=u.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <small>Type <b>{{ u.email }}</b> to permanently delete this user, their assessments, actions and scans.</small>
+              <input class="input slim" name="confirm_email" autocomplete="off" placeholder="{{ u.email }}">
+              <button class="btn danger sm">Permanently delete</button>
+            </form>
+          </details>
+          {% endif %}
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</section>
+
+<div class="two-col">
+  <section class="card">
+    <h2>{{ icon('mail','ic') }} Invitations</h2>
+    <div class="table"><table><tr><th>Invitee</th><th>Role</th><th>Status</th><th>Expires</th><th></th></tr>
+      {% for i in invites %}{% set expired = (i.expires_at.replace(tzinfo=now.tzinfo) if not i.expires_at.tzinfo else i.expires_at) < now %}
+      <tr><td><b>{{ i.fullname }}</b><small class="muted block">{{ i.email }}</small></td><td>{{ i.role }}</td>
+      <td><span class="status s-{{ 'success' if i.accepted_at else 'blocked' if i.revoked or expired else 'draft' }}">{{ 'Accepted' if i.accepted_at else 'Revoked' if i.revoked else 'Expired' if expired else i.email_status }}</span></td>
+      <td>{{ i.expires_at.strftime('%d %b %H:%M') }}</td>
+      <td>{% if not i.accepted_at and not i.revoked and not expired %}<form method="post" action="{{ url_for('revoke_invite', iid=i.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn ghost sm">Revoke</button></form>{% endif %}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty">No invitations yet.</td></tr>{% endfor %}
+    </table></div>
+  </section>
+  <section class="card">
+    <h2>{{ icon('activity','ic') }} Live security feed</h2>
+    {% if is_superadmin %}
+    <ul class="feed">{% for e in feed %}<li class="f-{{ e.outcome|lower }}"><span class="f-dot"></span><div><b>{{ e.event.replace('_',' ').title() }}</b> &middot; {{ e.outcome }}<small>{{ names.get(e.user_id, 'Anonymous / deleted') }} &middot; {{ e.details }} &middot; {{ e.created_at.strftime('%d %b %H:%M') }} UTC</small></div></li>{% else %}<li>No events yet.</li>{% endfor %}</ul>
+    {% else %}<p class="muted">The platform-wide security feed is visible to the Super Admin.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}
