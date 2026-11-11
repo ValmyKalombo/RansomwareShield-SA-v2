@@ -771,7 +771,7 @@ def ai_chat():
     question = str(data.get("question", ""))[:800]
     history = data.get("history") if isinstance(data.get("history"), list) else []
     result = shieldai.answer(app.config, question, history, ai_context(str(data.get("page", ""))[:60]))
-    audit("SHIELDAI", "SUCCESS", question[:90])
+    audit("SHIELDAI", "SUCCESS", shieldai.redact(question)[:90])
     return jsonify(result)
 
 

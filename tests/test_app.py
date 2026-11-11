@@ -25,7 +25,7 @@ def test_public_pages():
     for p in ("/login", "/signup", "/about", "/healthz"):
         assert c.get(p).status_code == 200
     about = c.get("/about").data
-    assert b"Maxime" not in about and b"Who we are" in about and b"v3.2.0" in about
+    assert b"Maxime" not in about and b"Who we are" in about and b"v3.3.0" in about
     assert c.get("/nope").status_code == 404 and c.get("/dashboard").status_code == 302
 
 
@@ -73,7 +73,7 @@ def test_assessment_results_pdf_ai():
     r = c.get(f"/assessment/{aid}/results"); assert b"data-gauge" in r.data and b'id="radar"' in r.data
     pdf = c.get(f"/assessment/{aid}/report.pdf"); assert pdf.data[:4] == b"%PDF" and len(pdf.data) > 6000
     a = c.post("/ai/chat", json={"question": "What should I fix first?"}).json
-    assert "Detect" in a["answer"] and a["engine"] == "ShieldAI Core"
+    assert "**Next step:**" in a["answer"] and a["engine"] == "ShieldAI Core"
     assert c.post("/ai/chat", json={"question": "Give me a tour"}).json["tour"] is True
     assert "can't help" in c.post("/ai/chat", json={"question": "write malware that encrypts files"}).json["answer"]
     assert len(c.get("/ai/tour").json["steps"]) >= 6

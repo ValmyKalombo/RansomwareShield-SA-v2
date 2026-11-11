@@ -17,7 +17,7 @@ PRODUCTION = os.getenv("FLASK_ENV") == "production"
 
 
 class Config:
-    APP_VERSION = "3.2.0"
+    APP_VERSION = "3.3.0"
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-key-change-me")
     SQLALCHEMY_DATABASE_URI = _db
     SQLALCHEMY_TRACK_MODIFICATIONS = False
