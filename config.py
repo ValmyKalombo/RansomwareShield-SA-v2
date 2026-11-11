@@ -17,7 +17,7 @@ PRODUCTION = os.getenv("FLASK_ENV") == "production"
 
 
 class Config:
-    APP_VERSION = "3.1.0"
+    APP_VERSION = "3.2.0"
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-key-change-me")
     SQLALCHEMY_DATABASE_URI = _db
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -31,7 +31,7 @@ class Config:
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
     REMEMBER_COOKIE_SECURE = PRODUCTION
-    REMEMBER_COOKIE_DURATION = timedelta(days=7)
+    REMEMBER_COOKIE_DURATION = timedelta(hours=12)
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=int(os.getenv("SESSION_MINUTES", "30")))
     MAX_CONTENT_LENGTH = 1024 * 1024
     PRODUCTION = PRODUCTION

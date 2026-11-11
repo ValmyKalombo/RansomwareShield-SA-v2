@@ -142,3 +142,6 @@ details.danger-zone summary{cursor:pointer;display:inline-flex;align-items:cente
 .shell{grid-template-columns:1fr}.sidebar{position:fixed;left:0;top:0;z-index:50;width:262px;transform:translateX(-100%);transition:transform .25s}.menu-open .sidebar{transform:none;box-shadow:20px 0 50px rgba(0,0,0,.35)}.menu-btn{display:block}.hide-sm{display:none}}
 @media(max-width:620px){.page{padding:16px 14px 90px}.grid2,.metrics,.metrics.six,.quick-grid,.pillars,.team{grid-template-columns:1fr}.hero{flex-direction:column;align-items:flex-start;padding:22px}.hero-brand img{width:56px;height:56px}.scale{grid-template-columns:repeat(3,1fr)}.auth-card{padding:24px}.scan-form,.scan-summary{grid-template-columns:1fr;display:grid}.ring{margin:auto}.bar{grid-template-columns:82px 1fr 52px}.crumb{display:none}.about-hero{flex-direction:column;text-align:center}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* v3.2.0 monitoring */
+.export-actions{display:flex;gap:7px;flex-wrap:wrap}.monitor-card .table{max-height:620px;overflow:auto}.mini-progress{width:100px;height:7px;background:#e7e9f2;border-radius:99px;overflow:hidden}.mini-progress i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#6f2cff,#31c8ff);transition:width .7s}.nowrap{white-space:nowrap}

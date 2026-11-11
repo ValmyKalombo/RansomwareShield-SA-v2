@@ -1,3 +1,5 @@
+from io import BytesIO, StringIO
+import csv
 """RansomwareShield-SA v3.1.0 - Cybersecurity Readiness Platform (Group 7 academic prototype)."""
 import hashlib
 import json
@@ -9,7 +11,7 @@ from pathlib import Path
 
 import msal
 import requests
-from flask import (Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session,
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, send_file, session,
                    url_for)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -248,7 +250,7 @@ ROLE_CHOICES = [("Assessor", "Assessor"), ("Organisation Manager", "Organisation
 class LoginForm(FlaskForm):
     email = StringField("Email address", validators=[DataRequired(), Email(), Length(max=255)])
     password = PasswordField("Password or one-time reset code", validators=[DataRequired(), Length(min=8, max=128)])
-    remember = BooleanField("Keep me signed in for 7 days")
+    remember = BooleanField("Keep me signed in")
     submit = SubmitField("Sign in securely")
 
 
@@ -785,6 +787,25 @@ def invite_serializer():
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="admin-invite")
 
 
+
+def build_monitoring():
+    """Every user's questionnaire progress and score, newest activity first."""
+    total = Question.query.count()
+    rows = []
+    for u in User.query.order_by(User.fullname).all():
+        assessments = Assessment.query.filter_by(user_id=u.id).order_by(Assessment.created_at.desc()).all()
+        if not assessments:
+            rows.append({"user": u, "assessment": None, "answered": 0, "total": total, "progress": 0,
+                         "last_activity": u.created_at})
+        for a in assessments:
+            answered = sum(1 for x in a.answers if x.value is not None or x.is_na)
+            rows.append({"user": u, "assessment": a, "answered": answered, "total": total,
+                         "progress": round(answered / total * 100) if total else 0,
+                         "last_activity": a.submitted_at or a.created_at})
+    floor = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    rows.sort(key=lambda r: aware(r["last_activity"]) or floor, reverse=True)
+    return rows, total
+
 @app.route("/management", methods=["GET", "POST"])
 @admin_required
 def management():
@@ -826,9 +847,92 @@ def management():
              "blocked24": Audit.query.filter(Audit.created_at >= now - timedelta(hours=24),
                                              Audit.outcome.in_(["BLOCKED", "FAILED"])).count()}
     reset_code = session.pop("reset_code", None)
-    return render_template("management.html", form=form, users=users, invites=invites, stats=stats,
-                           new_link=new_link, feed=feed, names=names, reset_code=reset_code, now=now)
+    # v3.2.0 questionnaire monitoring (read-only)
+    monitor, total_questions = build_monitoring()
 
+    return render_template("management.html", form=form, users=users, invites=invites, stats=stats,
+                           new_link=new_link, feed=feed, names=names, reset_code=reset_code, now=now,
+                           monitor=monitor, total_questions=total_questions)
+
+def _fmt(dt):
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+@app.get("/management/monitoring.csv")
+@admin_required
+def export_monitoring_csv():
+    rows, _ = build_monitoring()
+    out = StringIO()
+    w = csv.writer(out)
+    w.writerow(["User", "Email", "Organisation", "Role", "Assessment", "Status", "Answered", "Total",
+                "Completion %", "Score %", "Readiness", "Started UTC", "Submitted UTC"])
+    for r in rows:
+        u, a = r["user"], r["assessment"]
+        w.writerow([u.fullname, u.email, u.organisation, display_role(u),
+                    f"RSA-{a.id:04d}" if a else "", a.status if a else "Not started", r["answered"], r["total"],
+                    r["progress"], a.overall_score if a and a.overall_score is not None else "",
+                    a.readiness if a and a.readiness else "", _fmt(a.created_at) if a else "",
+                    _fmt(a.submitted_at) if a else ""])
+    audit("MANAGEMENT_EXPORT", "SUCCESS", "Monitoring CSV")
+    return Response(out.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=RansomwareShield-SA-Monitoring-{utcnow():%Y-%m-%d}.csv"})
+
+
+@app.get("/management/activity.csv")
+@admin_required
+def export_activity_csv():
+    users = {u.id: u for u in User.query.all()}
+    out = StringIO()
+    w = csv.writer(out)
+    w.writerow(["UTC time", "User", "Email", "Event", "Outcome", "Details"])
+    for e in Audit.query.order_by(Audit.created_at.desc()).all():
+        u = users.get(e.user_id)
+        w.writerow([_fmt(e.created_at), u.fullname if u else "Anonymous / deleted", u.email if u else "",
+                    e.event, e.outcome, e.details or ""])
+    audit("MANAGEMENT_EXPORT", "SUCCESS", "Activity CSV")
+    return Response(out.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=RansomwareShield-SA-Activity-{utcnow():%Y-%m-%d}.csv"})
+
+
+@app.get("/management/monitoring.pdf")
+@admin_required
+def export_monitoring_pdf():
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    rows, total = build_monitoring()
+    st = getSampleStyleSheet()
+    cell = st["BodyText"].clone("cell", fontSize=7.5, leading=9.5)
+    data = [["User", "Role", "Assessment", "Status", "Answered", "Completion", "Score", "Readiness", "Last activity (UTC)"]]
+    for r in rows:
+        u, a = r["user"], r["assessment"]
+        data.append([Paragraph(f"<b>{u.fullname}</b><br/>{u.email}<br/>{u.organisation}", cell), display_role(u),
+                     f"RSA-{a.id:04d}" if a else "-", a.status if a else "Not started", f"{r['answered']}/{total}",
+                     f"{r['progress']}%", f"{a.overall_score}%" if a and a.overall_score is not None else "-",
+                     a.readiness if a and a.readiness else "-", _fmt(r["last_activity"]) or "-"])
+    completed = sum(1 for r in rows if r["assessment"] and r["assessment"].status == "Completed")
+    drafts = sum(1 for r in rows if r["assessment"] and r["assessment"].status != "Completed")
+    not_started = sum(1 for r in rows if not r["assessment"])
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=12 * mm, rightMargin=12 * mm,
+                            topMargin=12 * mm, bottomMargin=12 * mm, title="RansomwareShield-SA Monitoring Report")
+    t = Table(data, repeatRows=1, colWidths=[62 * mm, 30 * mm, 24 * mm, 22 * mm, 20 * mm, 22 * mm, 18 * mm, 24 * mm, 30 * mm])
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6F2CFF")),
+                           ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                           ("FONTSIZE", (0, 0), (-1, -1), 7.5), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                           ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F5FB")]),
+                           ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DFE3EF")), ("PADDING", (0, 0), (-1, -1), 4)]))
+    doc.build([Paragraph("RansomwareShield-SA - Management Monitoring Report", st["Title"]),
+               Paragraph(f"Generated {utcnow():%d %B %Y %H:%M} UTC | v{app.config['APP_VERSION']} | "
+                         f"{completed} completed, {drafts} in progress, {not_started} users not started | Confidential", st["Normal"]),
+               Spacer(1, 5 * mm), t])
+    buf.seek(0)
+    audit("MANAGEMENT_EXPORT", "SUCCESS", "Monitoring PDF")
+    return send_file(buf, mimetype="application/pdf", as_attachment=True,
+                     download_name=f"RansomwareShield-SA-Monitoring-{utcnow():%Y-%m-%d}.pdf")
 
 @app.post("/management/user/<int:uid>")
 @admin_required

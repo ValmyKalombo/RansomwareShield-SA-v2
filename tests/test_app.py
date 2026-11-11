@@ -25,7 +25,7 @@ def test_public_pages():
     for p in ("/login", "/signup", "/about", "/healthz"):
         assert c.get(p).status_code == 200
     about = c.get("/about").data
-    assert b"Maxime" not in about and b"Who we are" in about and b"v3.1.0" in about
+    assert b"Maxime" not in about and b"Who we are" in about and b"v3.2.0" in about
     assert c.get("/nope").status_code == 404 and c.get("/dashboard").status_code == 302
 
 
@@ -86,3 +86,17 @@ def test_threat_validation_and_admin_block():
     assert c.get("/threat-exposure").status_code == 200
     assert c.post("/threat-exposure/scan", json={"target": "not a domain"}).status_code == 400
     assert c.post("/threat-exposure/scan", json={"target": "localhost"}).status_code == 400
+
+
+def test_management_monitoring_exports():
+    make("valmy@example.com"); make("watched@example.com")
+    su = app.test_client(); login(su, "valmy@example.com")
+    page = su.get("/management").data
+    assert b"Assessment monitoring" in page and b"watched@example.com" in page
+    csv_r = su.get("/management/monitoring.csv")
+    assert csv_r.status_code == 200 and b"Completion %" in csv_r.data
+    assert su.get("/management/activity.csv").status_code == 200
+    pdf = su.get("/management/monitoring.pdf")
+    assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    plain = app.test_client(); login(plain, "watched@example.com")
+    assert plain.get("/management/monitoring.csv").status_code == 403

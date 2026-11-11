@@ -46,6 +46,34 @@
   </section>
 </div>
 
+<section class="card monitor-card">
+  <div class="section-head">
+    <div><p class="eyebrow dark">Questionnaire oversight</p><h2>Assessment monitoring</h2>
+    <p class="muted">Read-only view of who has started, answered and completed the questionnaire, and the score it produced.</p></div>
+    <div class="export-actions">
+      <a class="btn ghost sm" href="{{ url_for('export_monitoring_csv') }}">&#8681; Monitoring CSV</a>
+      <a class="btn ghost sm" href="{{ url_for('export_activity_csv') }}">&#8681; Activity CSV</a>
+      <a class="btn primary sm" href="{{ url_for('export_monitoring_pdf') }}">&#8681; Management PDF</a>
+    </div>
+  </div>
+  <div class="table"><table>
+    <tr><th>User</th><th>Assessment</th><th>Status</th><th>Answered</th><th>Completion</th><th>Score</th><th>Readiness</th><th>Last activity</th><th></th></tr>
+    {% for m in monitor %}{% set a = m.assessment %}
+    <tr>
+      <td><b>{{ m.user.fullname }}</b><small class="muted block">{{ m.user.email }} &middot; {{ m.user.organisation }}</small></td>
+      <td>{{ ('RSA-%04d' % a.id) if a else '&mdash;'|safe }}</td>
+      <td><span class="status s-{{ a.status|lower if a else 'draft' }}">{{ a.status if a else 'Not started' }}</span></td>
+      <td><b>{{ m.answered }}/{{ m.total }}</b></td>
+      <td><div class="mini-progress"><i data-width="{{ m.progress }}"></i></div><small>{{ m.progress }}%</small></td>
+      <td>{{ (a.overall_score ~ '%') if a and a.overall_score is not none else '&mdash;'|safe }}</td>
+      <td>{{ a.readiness if a and a.readiness else '&mdash;'|safe }}</td>
+      <td>{{ m.last_activity.strftime('%d %b %Y %H:%M') if m.last_activity else '&mdash;'|safe }}</td>
+      <td class="nowrap">{% if a and a.status == 'Completed' %}<a class="btn ghost sm" href="{{ url_for('results', aid=a.id) }}">Results</a> <a class="btn ghost sm" href="{{ url_for('report', aid=a.id) }}">PDF</a>{% elif a %}<span class="muted">In progress</span>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="9" class="empty">No users yet.</td></tr>{% endfor %}
+  </table></div>
+</section>
+
 <section class="card">
   <div class="section-head"><h2>{{ icon('users','ic') }} User directory</h2><input class="input slim search" placeholder="Filter users" data-filter="#user-table"></div>
   <div class="table"><table id="user-table">
