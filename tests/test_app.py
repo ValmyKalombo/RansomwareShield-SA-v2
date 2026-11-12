@@ -6,6 +6,8 @@ os.environ["SUPERADMIN_EMAIL"] = "valmy@example.com"
 from app import app, db, User, Question, Answer, AdminInvite, Assessment  # noqa: E402
 
 app.config.update(TESTING=True, WTF_CSRF_ENABLED=False, RATELIMIT_ENABLED=False, SUPERADMIN_EMAIL="valmy@example.com")
+from app import limiter
+limiter.enabled = False
 PW = "Str0ng!Passw0rd"
 
 
@@ -25,7 +27,7 @@ def test_public_pages():
     for p in ("/login", "/signup", "/about", "/healthz"):
         assert c.get(p).status_code == 200
     about = c.get("/about").data
-    assert b"Maxime" not in about and b"Who we are" in about and b"v3.3.0" in about
+    assert b"Maxime" not in about and b"Who we are" in about and b"v3.4.0" in about
     assert c.get("/nope").status_code == 404 and c.get("/dashboard").status_code == 302
 
 
@@ -100,3 +102,27 @@ def test_management_monitoring_exports():
     assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
     plain = app.test_client(); login(plain, "watched@example.com")
     assert plain.get("/management/monitoring.csv").status_code == 403
+
+
+
+def test_research_export_is_anonymised():
+    from app import Question, Assessment, Answer
+    make("valmy@example.com"); make("pilot1@example.com")
+    with app.app_context():
+        if not Question.query.count():
+            for i, (code, fn) in enumerate([("GV1", "Govern"), ("PR6", "Protect"), ("ID4", "Identify")]):
+                db.session.add(Question(code=code, function=fn, order=i))
+            db.session.commit()
+        uid = User.query.filter_by(email="pilot1@example.com").first().id
+        a = Assessment(user_id=uid, organisation="Demo Bank", status="Completed", overall_score=50.0, readiness="Weak")
+        db.session.add(a); db.session.commit()
+        for q in Question.query.all():
+            db.session.add(Answer(assessment_id=a.id, question_id=q.id, value=3))
+        db.session.commit()
+    su = app.test_client(); login(su, "valmy@example.com")
+    r = su.get("/management/research.csv")
+    assert r.status_code == 200 and b"Human factor %" in r.data and b"P-" in r.data
+    assert b"pilot1@example.com" not in r.data and b"Pilot participant" not in r.data
+    plain = app.test_client(); login(plain, "pilot1@example.com")
+    assert plain.get("/management/research.csv").status_code == 403
+

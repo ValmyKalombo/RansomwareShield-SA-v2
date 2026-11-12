@@ -934,6 +934,60 @@ def export_monitoring_pdf():
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
                      download_name=f"RansomwareShield-SA-Monitoring-{utcnow():%Y-%m-%d}.pdf")
 
+
+# ---------------------------------------------------------------- v3.4.0 research export
+# Factor mapping used to answer research objective 2 (RSQ2). Some controls legitimately
+# belong to two factors (e.g. GV5 is both governance and third-party).
+RESEARCH_FACTORS = {
+    "Organisational": ["GV1", "GV2", "GV3", "GV4", "GV5", "GV6", "GV7", "ID6", "ID7"],
+    "Technological": ["PR1", "PR2", "PR3", "PR4", "PR5", "PR7", "PR8", "PR10",
+                      "DE1", "DE2", "DE3", "DE4", "DE5", "DE6", "DE7"],
+    "Human": ["PR6", "AI1", "AI3", "RS2"],
+    "Third-party": ["GV5", "ID4", "PR9", "DE5", "RC7"],
+}
+RESEARCH_FUNCTIONS = ["Govern", "Identify", "Protect", "Detect", "Respond", "Recover", "AI Preparedness"]
+
+
+def _pct(values):
+    vals = [(v - 1) / 4 * 100 for v in values if v]
+    return round(sum(vals) / len(vals), 1) if vals else ""
+
+
+@app.get("/management/research.csv")
+@admin_required
+def export_research_csv():
+    """Anonymised pilot-study dataset: one row per completed participant assessment."""
+    import hashlib as _hashlib
+    questions = Question.query.order_by(Question.order).all()
+    codes = [q.code for q in questions]
+    out = StringIO()
+    w = csv.writer(out)
+    w.writerow(["Participant", "Completed (UTC)", "Overall %", "Readiness"]
+               + [f"{f} %" for f in RESEARCH_FUNCTIONS]
+               + [f"{f} factor %" for f in RESEARCH_FACTORS] + codes)
+    rows = 0
+    for a in (Assessment.query.filter_by(status="Completed")
+              .order_by(Assessment.submitted_at).all()):
+        u = a.user
+        if u is None or display_role(u) in ("Super Admin", "Administrator", "Admin"):
+            continue
+        by_code = {x.question.code: (None if x.is_na else x.value) for x in a.answers}
+        by_fn = {}
+        for x in a.answers:
+            if not x.is_na and x.value:
+                by_fn.setdefault(x.question.function, []).append(x.value)
+        pid = "P-" + _hashlib.sha256(f"{app.config['SECRET_KEY']}:{u.id}:{a.id}".encode()).hexdigest()[:6].upper()
+        w.writerow([pid, a.submitted_at.strftime("%Y-%m-%d") if a.submitted_at else "",
+                    a.overall_score if a.overall_score is not None else "", a.readiness or ""]
+                   + [_pct(by_fn.get(f, [])) for f in RESEARCH_FUNCTIONS]
+                   + [_pct([by_code.get(c) for c in cs]) for cs in RESEARCH_FACTORS.values()]
+                   + [by_code.get(c) if by_code.get(c) is not None else "" for c in codes])
+        rows += 1
+    audit("RESEARCH_EXPORT", "SUCCESS", f"Anonymised research CSV, {rows} participant(s)")
+    return Response(out.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=RansomwareShield-SA-Research-{utcnow():%Y-%m-%d}.csv"})
+
+
 @app.post("/management/user/<int:uid>")
 @admin_required
 def manage_user(uid):
